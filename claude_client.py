@@ -2,6 +2,7 @@ import os
 
 import anthropic
 
+import audit
 import mcp_client
 from config import MAX_HISTORY
 from tools import BOTO3_TOOLS, run_boto3_tool
@@ -110,7 +111,11 @@ def _sanitize_history(messages: list) -> list:
     return messages
 
 
-async def ask_claude(user_message: str, history_key: int) -> str:
+async def ask_claude(user_message: str, history_key: int,
+                     user_id: int = 0, username: str = "unknown",
+                     bot=None) -> str:
+    audit.log_message(user_id, username, user_message)
+
     history = _history.setdefault(history_key, [])
     history.append({"role": "user", "content": user_message})
 
@@ -144,13 +149,17 @@ async def ask_claude(user_message: str, history_key: int) -> str:
 
             for block in response.content:
                 if block.type == "tool_use":
+                    audit.log_tool(user_id, username, block.name, dict(block.input))
                     try:
                         if block.name in _BOTO3_TOOL_NAMES:
                             result = run_boto3_tool(block.name, block.input)
                         else:
                             session, original_name = mcp_client.tool_to_session[block.name]
                             result = str((await session.call_tool(original_name, block.input)).content)
+                        if block.name in audit.WRITE_TOOLS:
+                            await audit.notify_write(bot, user_id, username, block.name, dict(block.input))
                     except Exception as e:
+                        audit.log_tool_error(user_id, username, block.name, str(e))
                         result = f"Tool error: {e}"
 
                     tool_results.append({

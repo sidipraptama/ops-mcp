@@ -99,7 +99,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user_text = update.message.text
 
     # history keyed per-user inside groups, per-chat in private
-    history_key = update.effective_user.id if chat_id < 0 else chat_id
+    user = update.effective_user
+    history_key = user.id if chat_id < 0 else chat_id
+    username = f"@{user.username}" if user.username else user.full_name
 
     thinking_msg = await update.message.reply_text("⏳ Thinking...")
 
@@ -111,7 +113,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     for attempt in range(3):
         try:
-            reply = await ask_claude(user_text, history_key)
+            reply = await ask_claude(user_text, history_key,
+                                     user_id=user.id, username=username,
+                                     bot=context.bot)
             chunks = split_message(reply)
             try:
                 await thinking_msg.edit_text(to_telegram_html(chunks[0]), parse_mode="HTML")

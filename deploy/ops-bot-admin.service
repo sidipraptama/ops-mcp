@@ -1,0 +1,15 @@
+[Unit]
+Description=Procal Ops Bot Admin Panel
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/ops-bot
+EnvironmentFile=/home/ubuntu/ops-bot/.env
+ExecStart=/home/ubuntu/ops-bot/venv/bin/python admin_panel.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=5
+
+[Install]
+WantedBy=multi-user.target

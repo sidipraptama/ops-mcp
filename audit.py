@@ -26,19 +26,22 @@ def _write(line: str) -> None:
     try:
         with open(AUDIT_LOG_FILE, "a") as f:
             f.write(line + "\n")
-    except Exception:
-        pass
+    except Exception as e:
+        import sys
+        print(f"[audit] failed to write log: {e}", file=sys.stderr)
 
 
 def log_message(user_id: int, username: str, text: str) -> None:
-    safe = text.replace("\n", " ")[:200]
+    safe = text.replace("\n", " ")
+    if len(safe) > 200:
+        safe = safe[:200] + "..."
     _write(f'[{_now()}] MSG user={user_id} username={username} text="{safe}"')
 
 
 def log_tool(user_id: int, username: str, tool: str, inputs: dict) -> None:
     slim = {}
     for k, v in inputs.items():
-        slim[k] = (str(v)[:80] + "…") if k in _SENSITIVE_KEYS and len(str(v)) > 80 else v
+        slim[k] = (str(v)[:80] + "...") if k in _SENSITIVE_KEYS and len(str(v)) > 80 else v
     _write(f"[{_now()}] TOOL user={user_id} username={username} tool={tool} inputs={json.dumps(slim)}")
 
 

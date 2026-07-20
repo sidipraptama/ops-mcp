@@ -8,10 +8,8 @@ _uvx = os.path.expanduser("~/.local/bin/uvx")
 _PATH = os.environ.get("PATH", "")
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
-ALLOWED_CHAT_IDS: set[int] = {-1004269056589}
-ALLOWED_THREAD_ID: int = 4       # topic/thread for ops commands
 AUDIT_CHAT_ID: int = -1004269056589
-AUDIT_THREAD_ID: int | None = int(os.getenv("AUDIT_THREAD_ID")) if os.getenv("AUDIT_THREAD_ID") else None
+AUDIT_THREAD_ID: int | None = int(v) if (v := os.getenv("AUDIT_THREAD_ID")) else None
 
 # ── Audit log ─────────────────────────────────────────────────────────────────
 AUDIT_LOG_FILE: str = os.path.expanduser("~/.ops-bot-audit.log")
@@ -35,8 +33,8 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
         command=_uvx,
         args=["mcp-grafana"],
         env={
-            "GRAFANA_URL": os.getenv("GRAFANA_URL"),
-            "GRAFANA_SERVICE_ACCOUNT_TOKEN": os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN"),
+            "GRAFANA_URL": os.getenv("GRAFANA_URL", ""),
+            "GRAFANA_SERVICE_ACCOUNT_TOKEN": os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN", ""),
             "PATH": _PATH,
         },
     ),

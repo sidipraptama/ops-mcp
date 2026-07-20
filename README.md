@@ -131,6 +131,23 @@ The bot can fix code issues directly in Bitbucket without cloning locally:
 
 A no-nonsense persona. Short answers, no pleasantries, does the ops work without enthusiasm.
 
+### 6. Audit notifications
+
+Every write action the bot takes sends a Telegram notification to the configured audit chat. The following tools trigger a notification:
+
+| Tool | Action |
+|------|--------|
+| `approve_pr` | Approved a PR |
+| `unapprove_pr` | Unapproved a PR |
+| `request_changes_pr` | Requested changes on a PR |
+| `decline_pr` | Declined a PR |
+| `post_pr_comment` | Posted a comment on a PR |
+| `delete_pr_comment` | Deleted a comment |
+| `commit_file_to_new_branch` | Committed a fix to a `bot/fix-pr*` branch |
+| `create_pr` | Opened a new PR |
+
+Configure the destination chat and thread via the admin panel **Settings** tab.
+
 ---
 
 ## Telegram commands
@@ -209,7 +226,24 @@ git clone git@bitbucket.org:academytools/procal-infra-3.git procal-infra
 
 These are read-only — the MCP git server reads the local `.git` directory regardless of the remote origin.
 
-### 3. Install Python dependencies
+### 3. Keep repos in sync (cron)
+
+The Git MCP servers read the local clones directly — they won't see new commits until the clone is pulled. Add a cron job to keep them fresh:
+
+```bash
+crontab -e
+```
+
+```
+*/5 * * * * git -C /home/ubuntu/dora pull --ff-only -q >> /home/ubuntu/dora/.git/pull.log 2>&1
+*/5 * * * * git -C /home/ubuntu/maps pull --ff-only -q >> /home/ubuntu/maps/.git/pull.log 2>&1
+*/5 * * * * git -C /home/ubuntu/boots pull --ff-only -q >> /home/ubuntu/boots/.git/pull.log 2>&1
+*/5 * * * * git -C /home/ubuntu/procal-infra pull --ff-only -q >> /home/ubuntu/procal-infra/.git/pull.log 2>&1
+```
+
+Each repo pulls independently every 5 minutes. Logs go to `<repo>/.git/pull.log`. `--ff-only` ensures the pull fails loudly (into the log) rather than silently creating a merge commit if the history diverges.
+
+### 4. Install Python dependencies
 
 ```bash
 cd ~/ops-bot
@@ -217,7 +251,7 @@ python3 -m venv venv
 venv/bin/pip install -r requirements.txt
 ```
 
-### 4. Create `.env`
+### 5. Create `.env`
 
 ```env
 # LLM proxy
@@ -257,7 +291,7 @@ ADMIN_PORT=8080
 | `BITBUCKET_USER` | Your Bitbucket account **email** (not username) |
 | `BITBUCKET_APP_PASSWORD` | Bitbucket → Personal settings → App passwords → Create (needs: Repositories read/write, Pull requests read/write) |
 
-### 5. IAM role
+### 6. IAM role
 
 Attach an IAM role to the EC2 instance with:
 - `ec2:Describe*`
@@ -265,7 +299,7 @@ Attach an IAM role to the EC2 instance with:
 - `cloudwatch:GetMetricData`, `cloudwatch:DescribeAlarms`
 - `logs:DescribeLogGroups`, `logs:GetLogEvents`, `logs:FilterLogEvents`
 
-### 6. Run as systemd services
+### 7. Run as systemd services
 
 Service unit files are in `deploy/`. The setup script installs both:
 
@@ -284,7 +318,7 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now ops-bot ops-bot-admin
 ```
 
-### 7. Restart after updates
+### 8. Restart after updates
 
 ```bash
 # bot only
@@ -328,6 +362,14 @@ pkill -f bot.py && sudo systemctl start ops-bot
 | `deploy/ops-bot-admin.service` | systemd unit for the admin panel |
 | `scripts/setup-server.sh` | One-time EC2 setup: installs deps, registers both systemd units, configures logrotate |
 | `scripts/list_tools.py` | Dev utility: lists all tools available from the Grafana MCP server |
+
+**Runtime files** (created automatically, not in the repo)
+
+| File | Purpose |
+|------|---------|
+| `~/.ops-bot-config.json` | Chat allowlist, per-chat tool toggles, audit notification target. Managed by `bot_config.py` and the admin panel. |
+| `~/.ops-bot-audit.log` | Append-only audit log of all messages, tool calls, and errors. Viewable in the admin panel Logs tab. |
+| `~/.ops-bot-pr-state.json` | PR polling state — tracks which PR IDs and commit SHAs have already been reviewed, so the bot doesn't double-review on restart. |
 
 ---
 

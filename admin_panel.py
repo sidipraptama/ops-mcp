@@ -147,6 +147,19 @@ def _parse_log_line(line: str) -> dict | None:
     return result
 
 
+@app.get("/api/audit")
+async def get_audit(_=Depends(require_auth)):
+    return bot_config.get_audit_config()
+
+
+@app.put("/api/audit")
+async def set_audit(body: dict, _=Depends(require_auth)):
+    chat_id   = int(body["chat_id"])   if body.get("chat_id")   not in (None, "", 0) else None
+    thread_id = int(body["thread_id"]) if body.get("thread_id") not in (None, "", 0) else None
+    bot_config.set_audit_config(chat_id, thread_id)
+    return {"ok": True}
+
+
 @app.get("/api/logs")
 async def get_logs(limit: int = 300, _=Depends(require_auth)):
     path = os.path.expanduser("~/.ops-bot-audit.log")

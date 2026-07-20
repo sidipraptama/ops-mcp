@@ -19,11 +19,14 @@ EC2 (procal-ops) — private subnet + NAT Gateway
     ├── audit.py             ← audit trail (log file + Telegram notifications)
     ├── polling.py           ← auto PR review loop (infra repo → main)
     ├── tools/
-    │   ├── aws.py           ← EC2, Inspector (boto3) + tool schema definitions
-    │   └── bitbucket.py     ← Bitbucket REST API (PRs, comments, branches)
+    │   ├── __init__.py      ← unified tool registry (ALL_TOOLS, run_tool)
+    │   ├── aws.py           ← EC2 + Inspector boto3 tools
+    │   └── bitbucket.py     ← Bitbucket REST API + tool schemas (PRs, comments, branches)
     ├── tg/
     │   ├── handlers.py      ← message routing and command handlers
     │   └── formatting.py    ← markdown→HTML, message splitting, rate-limit parsing
+    ├── templates/
+    │   └── admin.html       ← admin panel SPA (HTML/CSS/JS)
     ├── deploy/
     │   ├── ops-bot.service          ← systemd unit for the bot
     │   └── ops-bot-admin.service    ← systemd unit for the admin panel
@@ -50,11 +53,26 @@ Claude receives a unified tool list built from three sources:
 
 | Source | Tools | Count |
 |--------|-------|-------|
-| `tools/aws.py` | EC2, Inspector, all Bitbucket actions | ~14 |
+| `tools/aws.py` | EC2 (`list_ec2_instances`), Inspector (`list_inspector_findings`) | 2 |
+| `tools/bitbucket.py` | PR CRUD, comments, approvals, branch commits | 11 |
 | Grafana MCP server | Loki logs, Prometheus, incidents, traces | 7 |
 | Git MCP servers (×4) | `git_log`, `git_diff`, `git_show`, `git_read_file`, `git_status` per repo | 20 |
 
 Git tools are prefixed by repo: `dora_git_log`, `maps_git_diff`, `infra_git_read_file`, etc.
+
+### Tool groups (admin panel toggles)
+
+| Toggle | Controls |
+|--------|----------|
+| `aws` | EC2 instance listing, Inspector vulnerability findings |
+| `bitbucket` | All Bitbucket operations across all repos (PRs, comments, approvals) |
+| `grafana` | Loki logs, Prometheus metrics, Tempo traces, incidents |
+| `git-dora` | Read git history from local `~/dora` clone |
+| `git-maps` | Read git history from local `~/maps` clone |
+| `git-boots` | Read git history from local `~/boots` clone |
+| `git-infra` | Read git history from local `~/procal-infra` clone |
+
+Note: `bitbucket` is all-or-nothing — there is no per-repo Bitbucket toggle.
 
 ---
 
@@ -160,6 +178,7 @@ ADMIN_PASSWORD=<your-password>
 | **Remove chat** | Stop the bot from responding in a chat |
 | **Toggle tools** | Enable or disable tool groups (AWS, Bitbucket, Grafana, Git repos) per chat |
 | **Edit chat** | Update display name or change the topic thread |
+| **Logs tab** | View the audit log (messages, tool calls, errors) with type and username filters. Auto-refreshes every 10s. |
 
 Changes are saved immediately to `~/.ops-bot-config.json` and picked up by the bot on the next message.
 
@@ -218,7 +237,7 @@ BITBUCKET_WORKSPACE=academytools
 
 # Admin panel
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=changeme
+ADMIN_PASSWORD=<strong-password>   # required — bot refuses to start without this
 ADMIN_PORT=8080
 ```
 
@@ -289,8 +308,10 @@ pkill -f bot.py && sudo systemctl start ops-bot
 | `claude_client.py` | `ask_claude()` — Claude API loop with tool dispatch, per-user history, both system prompts |
 | `audit.py` | Appends to `~/.ops-bot-audit.log`. Sends Telegram notifications for write-action tool calls |
 | `polling.py` | Background asyncio task watching `procal-infra-3` → `main` PRs every 5 min |
-| `tools/aws.py` | boto3 EC2 + Inspector. Defines `BOTO3_TOOLS` schema list |
-| `tools/bitbucket.py` | Bitbucket REST API: PR CRUD, comments, branch creation, file commits |
+| `tools/__init__.py` | Unified tool registry: `ALL_TOOLS`, `BITBUCKET_TOOL_NAMES`, `run_tool()` dispatcher |
+| `tools/aws.py` | boto3 EC2 + Inspector: `AWS_TOOLS` schemas and executor |
+| `tools/bitbucket.py` | Bitbucket REST API + `BITBUCKET_TOOLS` schemas: PR CRUD, comments, branch creation, file commits |
+| `templates/admin.html` | Admin panel SPA — all HTML, CSS, and JavaScript |
 | `tg/handlers.py` | `handle_message` routing: allowlist, mention/reply detection, inline command dispatch |
 | `tg/formatting.py` | Markdown→Telegram HTML, message splitter (4096-char limit), rate-limit parser |
 

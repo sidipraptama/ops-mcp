@@ -169,7 +169,7 @@ async def ask_claude(user_message: str, history_key: int,
 
         enabled = bot_config.get_tools_for_chat(chat_id)
         tools = mcp_client.filter_tools(enabled)
-        system = TSIM_PROMPT if is_tsim(history_key) else _build_system_prompt(enabled)
+        system = TSIM_PROMPT if is_tsim(chat_id) else _build_system_prompt(enabled)
 
         response = claude.messages.create(
             model="claude-haiku",

@@ -26,12 +26,12 @@ async def handle_chatid(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def handle_tsim(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_tsim(update.effective_user.id, True)
+    set_tsim(update.effective_chat.id, True)
     await update.message.reply_text("tsim mode on. dont expect me to be nice.")
 
 
 async def handle_tsim_off(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    set_tsim(update.effective_user.id, False)
+    set_tsim(update.effective_chat.id, False)
     await update.message.reply_text("✅ Back to normal mode.")
 
 

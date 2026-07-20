@@ -4,17 +4,16 @@ import traceback
 from telegram import Update
 from telegram.ext import ContextTypes
 
+import bot_config
 import claude_client
-from claude_client import ask_claude, _history
-from config import ALLOWED_CHAT_IDS, ALLOWED_THREAD_ID
+from claude_client import ask_claude, clear_history, set_tsim, is_tsim
 from tg.formatting import to_telegram_html, split_message, parse_reset_wait
 
 
 # ── Command handlers ──────────────────────────────────────────────────────────
 
 async def handle_clear(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    _history.pop(update.effective_user.id, None)
-    _history.pop(update.effective_chat.id, None)
+    clear_history(update.effective_user.id)
     await update.message.reply_text("🗑️ Conversation cleared.")
 
 
@@ -27,12 +26,12 @@ async def handle_chatid(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def handle_tsim(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    claude_client.tsim_mode = True
+    set_tsim(update.effective_user.id, True)
     await update.message.reply_text("tsim mode on. dont expect me to be nice.")
 
 
 async def handle_tsim_off(update: Update, _context: ContextTypes.DEFAULT_TYPE) -> None:
-    claude_client.tsim_mode = False
+    set_tsim(update.effective_user.id, False)
     await update.message.reply_text("✅ Back to normal mode.")
 
 
@@ -51,11 +50,13 @@ _INLINE_COMMANDS = {
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
 
-    if chat_id not in ALLOWED_CHAT_IDS:
+    allowed_chats = bot_config.get_allowed_chats()
+    if chat_id not in allowed_chats:
         return
 
+    expected_thread = allowed_chats[chat_id]
     thread_id = update.message.message_thread_id if update.message else None
-    if thread_id != ALLOWED_THREAD_ID:
+    if expected_thread is not None and thread_id != expected_thread:
         return
 
     # groups: respond only on @mention or reply to bot
@@ -85,9 +86,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if e.type == "mention":
                 user_text = (user_text[:e.offset] + user_text[e.offset + e.length:]).strip()
 
+        if not user_text:
+            return
+
         # prepend quoted context when replying to bot
         if is_reply_to_bot and reply_to.text:
-            user_text = f"[Replying to your message:\n{reply_to.text}\n]\n\n{user_text}"
+            quoted = reply_to.text[:500]
+            user_text = f"[Replying to your message:\n{quoted}\n]\n\n{user_text}"
 
         # dispatch inline commands e.g. "@bot /tsim"
         if user_text.startswith("/"):
@@ -115,7 +120,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             reply = await ask_claude(user_text, history_key,
                                      user_id=user.id, username=username,
-                                     bot=context.bot)
+                                     bot=context.bot, chat_id=chat_id)
             chunks = split_message(reply)
             try:
                 await thinking_msg.edit_text(to_telegram_html(chunks[0]), parse_mode="HTML")
@@ -127,7 +132,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 except Exception:
                     await update.message.reply_text(chunk)
             return
-        except BaseException as e:
+        except Exception as e:
             traceback.print_exc()
             inner = e.exceptions[0] if hasattr(e, "exceptions") and e.exceptions else e
             err_str = str(inner)

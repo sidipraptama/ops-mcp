@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ops Bot</title>
+<style>
+/* -- Tokens -------------------------------------------------------- */
+:root {
+  --bg:      #F5F5F7;
+  --surface: #FFFFFF;
+  --surf2:   #F5F5F7;
+  --border:  rgba(0,0,0,0.08);
+  --t1:      #1D1D1F;
+  --t2:      #6E6E73;
+  --t3:      #AEAEB2;
+  --accent:  #0071E3;
+  --green:   #28CD41;
+  --red:     #FF3B30;
+  --tog-off: rgba(0,0,0,0.12);
+  --nav-bg:  rgba(245,245,247,0.88);
+  --sh-s:    0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.04);
+  --sh-m:    0 20px 60px rgba(0,0,0,0.12);
+  --r:       18px;
+  --rs:      10px;
+}
+@media (prefers-color-scheme:dark) { :root {
+  --bg:#000; --surface:#1D1D1F; --surf2:#2C2C2E;
+  --border:rgba(255,255,255,0.1);
+  --t1:#F5F5F7; --t2:#86868B; --t3:#48484A;
+  --accent:#2997FF; --green:#28CD41; --red:#FF453A;
+  --tog-off:rgba(255,255,255,0.15);
+  --nav-bg:rgba(0,0,0,0.88);
+  --sh-s:0 0 0 1px rgba(255,255,255,0.06); --sh-m:none;
+}}
+:root[data-theme="light"] {
+  --bg:#F5F5F7; --surface:#FFF; --surf2:#F5F5F7;
+  --border:rgba(0,0,0,0.08);
+  --t1:#1D1D1F; --t2:#6E6E73; --t3:#AEAEB2;
+  --accent:#0071E3; --green:#28CD41; --red:#FF3B30;
+  --tog-off:rgba(0,0,0,0.12);
+  --nav-bg:rgba(245,245,247,0.88);
+  --sh-s:0 2px 8px rgba(0,0,0,0.06),0 0 0 1px rgba(0,0,0,0.04);
+  --sh-m:0 20px 60px rgba(0,0,0,0.12);
+}
+:root[data-theme="dark"] {
+  --bg:#000; --surface:#1D1D1F; --surf2:#2C2C2E;
+  --border:rgba(255,255,255,0.1);
+  --t1:#F5F5F7; --t2:#86868B; --t3:#48484A;
+  --accent:#2997FF; --green:#28CD41; --red:#FF453A;
+  --tog-off:rgba(255,255,255,0.15);
+  --nav-bg:rgba(0,0,0,0.88);
+  --sh-s:0 0 0 1px rgba(255,255,255,0.06); --sh-m:none;
+}
+
+*,::before,::after { box-sizing:border-box; margin:0; padding:0; }
+body {
+  background:var(--bg); color:var(--t1);
+  font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;
+  font-size:17px; line-height:1.5; min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* -- Login --------------------------------------------------------- */
+#login-page {
+  display:flex; align-items:center; justify-content:center;
+  min-height:100vh; padding:24px;
+}
+.login-card {
+  background:var(--surface); border-radius:20px;
+  box-shadow:var(--sh-m);
+  padding:48px 44px 40px; width:100%; max-width:400px;
+}
+.login-wordmark { font-size:24px; font-weight:700; letter-spacing:-.5px; margin-bottom:6px; }
+.login-sub      { font-size:15px; color:var(--t2); margin-bottom:36px; }
+.field          { margin-bottom:14px; }
+.field label    { display:block; font-size:13px; font-weight:500; color:var(--t2); margin-bottom:7px; }
+.field input {
+  display:block; width:100%;
+  background:var(--surf2); border:1px solid var(--border);
+  border-radius:var(--rs); color:var(--t1);
+  font-family:inherit; font-size:15px;
+  padding:12px 14px; outline:none;
+  transition:border-color .15s, box-shadow .15s;
+}
+.field input:focus {
+  border-color:var(--accent);
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 20%,transparent);
+}
+.login-err { font-size:13px; color:var(--red); min-height:18px; margin-top:8px; }
+.btn-primary {
+  display:flex; align-items:center; justify-content:center;
+  width:100%; margin-top:24px;
+  background:var(--accent); color:#fff;
+  font-family:inherit; font-size:15px; font-weight:600;
+  border:none; border-radius:100px; padding:13px;
+  cursor:pointer; transition:opacity .15s;
+}
+.btn-primary:hover    { opacity:.86; }
+.btn-primary:active   { opacity:.72; }
+.btn-primary:disabled { opacity:.5; cursor:default; }
+
+/* -- Dashboard ----------------------------------------------------- */
+#dashboard { display:none; flex-direction:column; min-height:100vh; }
+
+/* -- Nav ----------------------------------------------------------- */
+nav {
+  position:sticky; top:0; z-index:50; height:52px;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 24px;
+  background:var(--nav-bg);
+  backdrop-filter:blur(20px) saturate(180%);
+  -webkit-backdrop-filter:blur(20px) saturate(180%);
+  border-bottom:1px solid var(--border);
+}
+.nav-title { font-size:15px; font-weight:600; letter-spacing:-.2px; }
+.nav-right { display:flex; align-items:center; gap:16px; }
+.nav-user  { font-size:13px; color:var(--t2); }
+.icon-btn {
+  background:none; border:none; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  width:32px; height:32px; border-radius:50%; color:var(--t2);
+  transition:background .15s, color .15s;
+}
+.icon-btn:hover { background:var(--border); color:var(--t1); }
+.link-btn {
+  background:none; border:none; cursor:pointer;
+  font-family:inherit; font-size:14px; color:var(--accent);
+  padding:0; transition:opacity .15s;
+}
+.link-btn:hover        { opacity:.7; }
+.link-btn.muted        { color:var(--t2); }
+.link-btn.muted:hover  { color:var(--t1); opacity:1; }
+.link-btn.danger       { color:var(--red); }
+
+/* -- Main ---------------------------------------------------------- */
+main {
+  flex:1; max-width:760px; width:100%;
+  margin:0 auto; padding:0 24px 80px;
+}
+.page-header {
+  display:flex; align-items:baseline; justify-content:space-between;
+  padding:44px 0 28px;
+}
+.page-title { font-size:32px; font-weight:700; letter-spacing:-.7px; }
+.add-btn {
+  background:var(--accent); color:#fff;
+  font-family:inherit; font-size:14px; font-weight:500;
+  border:none; border-radius:100px; padding:8px 18px;
+  cursor:pointer; transition:opacity .15s; white-space:nowrap;
+}
+.add-btn:hover { opacity:.86; }
+
+/* -- Chat card (apple.com style) ----------------------------------- */
+.chat-card {
+  background:var(--surface);
+  border-radius:var(--r);
+  box-shadow:var(--sh-s);
+  margin-bottom:20px;
+  overflow:hidden;
+}
+.card-header {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  padding:28px 28px 20px; gap:16px;
+}
+.card-name { font-size:19px; font-weight:600; letter-spacing:-.3px; margin-bottom:5px; }
+.card-meta {
+  font-size:13px; color:var(--t2);
+  font-family:'SF Mono',ui-monospace,'Cascadia Mono',monospace;
+  letter-spacing:-.01em;
+}
+.card-meta-thread { font-family:inherit; margin-left:8px; }
+.card-actions { display:flex; gap:12px; flex-shrink:0; padding-top:2px; }
+
+.card-divider { height:1px; background:var(--border); margin:0 28px; }
+
+.tools-section { padding:20px 28px 24px; }
+.tools-label {
+  font-size:12px; font-weight:600; color:var(--t3);
+  text-transform:uppercase; letter-spacing:.06em;
+  margin-bottom:16px;
+}
+.tool-rows { display:flex; flex-direction:column; gap:0; }
+.tool-row {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:10px 0; border-bottom:1px solid var(--border);
+}
+.tool-row:last-child { border-bottom:none; }
+.tool-row-name { font-size:15px; color:var(--t1); }
+
+/* -- Toggle (web-scale, not iOS-scale) ----------------------------- */
+.toggle {
+  position:relative; display:inline-block;
+  width:42px; height:24px; flex-shrink:0; cursor:pointer;
+}
+.toggle input { opacity:0; width:0; height:0; position:absolute; }
+.toggle .track {
+  position:absolute; inset:0;
+  background:var(--tog-off); border-radius:100px;
+  transition:background .2s ease;
+}
+.toggle .track::after {
+  content:''; position:absolute; top:2px; left:2px;
+  width:20px; height:20px; background:#fff; border-radius:50%;
+  box-shadow:0 1px 4px rgba(0,0,0,0.25);
+  transition:transform .2s cubic-bezier(.4,0,.2,1);
+}
+.toggle input:checked+.track           { background:var(--green); }
+.toggle input:checked+.track::after   { transform:translateX(18px); }
+
+/* -- Card footer --------------------------------------------------- */
+.card-footer { padding:0 28px 20px; }
+
+/* -- Empty --------------------------------------------------------- */
+.empty       { text-align:center; padding:100px 20px; }
+.empty-title { font-size:22px; font-weight:600; letter-spacing:-.3px; margin-bottom:10px; }
+.empty-sub   { font-size:15px; color:var(--t2); }
+
+/* -- Modal --------------------------------------------------------- */
+.overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.35);
+  display:none; align-items:center; justify-content:center;
+  z-index:100; padding:24px;
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+}
+.overlay.open { display:flex; }
+.overlay.open .modal { animation:modal-in .22s cubic-bezier(.4,0,.2,1) both; }
+@keyframes modal-in {
+  from { opacity:0; transform:scale(.95) translateY(10px); }
+  to   { opacity:1; transform:scale(1)   translateY(0); }
+}
+.modal {
+  background:var(--surface); border-radius:20px;
+  box-shadow:0 24px 80px rgba(0,0,0,0.2),0 0 0 1px var(--border);
+  width:100%; max-width:440px; overflow:hidden;
+}
+.modal-header {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:24px 24px 0;
+}
+.modal-title { font-size:17px; font-weight:600; letter-spacing:-.2px; }
+.modal-x {
+  background:var(--surf2); border:none;
+  width:28px; height:28px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; color:var(--t2); font-size:16px; line-height:1;
+  transition:background .15s;
+}
+.modal-x:hover { background:var(--border); }
+.modal-body    { padding:20px 24px; }
+.mf            { margin-bottom:18px; }
+.mf:last-child { margin-bottom:0; }
+.mf label {
+  display:block; font-size:13px; font-weight:500;
+  color:var(--t2); margin-bottom:7px;
+}
+.mf input {
+  display:block; width:100%;
+  background:var(--surf2); border:1px solid var(--border);
+  border-radius:var(--rs); color:var(--t1);
+  font-family:inherit; font-size:15px;
+  padding:11px 13px; outline:none; transition:border-color .15s;
+}
+.mf input:focus { border-color:var(--accent); }
+.mf .hint { font-size:12px; color:var(--t3); margin-top:5px; }
+.modal-footer {
+  display:flex; justify-content:flex-end;
+  gap:8px; padding:0 24px 24px;
+}
+.btn-cancel {
+  background:var(--surf2); border:1px solid var(--border);
+  font-family:inherit; font-size:14px; font-weight:500; color:var(--t1);
+  border-radius:100px; padding:9px 18px; cursor:pointer; transition:background .15s;
+}
+.btn-cancel:hover { background:var(--border); }
+.btn-ok {
+  background:var(--accent); border:none;
+  font-family:inherit; font-size:14px; font-weight:600; color:#fff;
+  border-radius:100px; padding:9px 18px; cursor:pointer; transition:opacity .15s;
+}
+.btn-ok:hover { opacity:.86; }
+
+/* -- Toast --------------------------------------------------------- */
+#toast {
+  position:fixed; bottom:28px; left:50%;
+  transform:translateX(-50%) translateY(16px);
+  background:rgba(29,29,31,0.92); color:#fff;
+  font-size:13px; font-weight:500;
+  padding:10px 20px; border-radius:100px;
+  white-space:nowrap; opacity:0;
+  transition:opacity .2s, transform .2s;
+  z-index:200;
+  backdrop-filter:blur(16px); -webkit-backdrop-filter:blur(16px);
+}
+#toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+#toast.err  { background:rgba(255,59,48,0.92); }
+
+@media (prefers-reduced-motion:reduce) {
+  *,::before,::after { transition-duration:.01ms !important; animation-duration:.01ms !important; }
+}
+
+/* -- Nav sections -- */
+.nav-left { display:flex; align-items:center; gap:20px; }
+.nav-sections { display:flex; gap:2px; }
+.nav-section {
+  background:none; border:none; cursor:pointer;
+  font-family:inherit; font-size:14px; font-weight:500; color:var(--t2);
+  padding:5px 10px; border-radius:7px;
+  transition:background .15s, color .15s;
+}
+.nav-section:hover  { background:var(--border); color:var(--t1); }
+.nav-section.active { background:var(--border); color:var(--t1); }
+
+/* -- Log toolbar -- */
+.log-toolbar {
+  display:flex; align-items:center; justify-content:space-between;
+  gap:12px; margin-bottom:20px; flex-wrap:wrap;
+}
+.filter-pills { display:flex; gap:6px; flex-wrap:wrap; }
+.filter-pill {
+  background:var(--surf2); border:1px solid var(--border);
+  font-family:inherit; font-size:13px; font-weight:500; color:var(--t2);
+  border-radius:100px; padding:5px 14px; cursor:pointer; transition:all .15s;
+}
+.filter-pill.active { background:var(--t1); color:var(--bg); border-color:var(--t1); }
+.log-right { display:flex; align-items:center; gap:10px; }
+.log-search {
+  background:var(--surf2); border:1px solid var(--border);
+  border-radius:var(--rs); color:var(--t1);
+  font-family:inherit; font-size:14px;
+  padding:7px 12px; outline:none; transition:border-color .15s; width:180px;
+}
+.log-search:focus { border-color:var(--accent); }
+.auto-label {
+  display:flex; align-items:center; gap:6px;
+  font-size:13px; color:var(--t2); cursor:pointer; white-space:nowrap;
+}
+.auto-label input { cursor:pointer; }
+
+/* -- Log entries -- */
+#log-list { padding-bottom:40px; }
+.log-entry {
+  display:flex; align-items:flex-start; gap:14px;
+  padding:13px 0; border-bottom:1px solid var(--border);
+}
+.log-entry:last-child { border-bottom:none; }
+.log-badge {
+  font-size:10px; font-weight:700; letter-spacing:.06em;
+  text-transform:uppercase; border-radius:5px;
+  padding:3px 7px; white-space:nowrap; flex-shrink:0; margin-top:1px;
+}
+.badge-MSG   { background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--accent); }
+.badge-TOOL  { background:color-mix(in srgb,#A855F7 14%,transparent); color:#A855F7; }
+.badge-ERROR { background:color-mix(in srgb,var(--red) 14%,transparent); color:var(--red); }
+.log-body { flex:1; min-width:0; }
+.log-who {
+  font-size:13px; color:var(--t2); margin-bottom:3px;
+  font-family:'SF Mono',ui-monospace,monospace;
+}
+.log-who-name { color:var(--t1); font-weight:600; }
+.log-detail { font-size:14px; color:var(--t1); word-break:break-word; }
+.log-inputs {
+  margin-top:5px; font-size:12px; color:var(--t2);
+  font-family:'SF Mono',ui-monospace,monospace;
+  background:var(--surf2); border-radius:var(--rs);
+  padding:8px 10px; overflow-x:auto; white-space:pre-wrap; word-break:break-all;
+}
+.log-ts {
+  font-size:11px; color:var(--t3);
+  font-family:'SF Mono',ui-monospace,monospace;
+  white-space:nowrap; flex-shrink:0; padding-top:3px; text-align:right;
+}
+.log-empty { text-align:center; padding:80px 20px; color:var(--t2); font-size:15px; }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div id="login-page">
+  <div class="login-card">
+    <div class="login-wordmark">Ops Bot</div>
+    <div class="login-sub">Admin console</div>
+    <form onsubmit="doLogin(event)">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+      </div>
+      <div class="login-err" id="login-err"></div>
+      <button class="btn-primary" type="submit" id="login-btn">Sign In</button>
+    </form>
+  </div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+  <nav>
+    <div class="nav-left">
+      <span class="nav-title">Ops Bot</span>
+      <div class="nav-sections">
+        <button class="nav-section active" id="tab-chats" onclick="switchView('chats')">Chats</button>
+        <button class="nav-section" id="tab-logs"  onclick="switchView('logs')">Logs</button>
+      </div>
+    </div>
+    <div class="nav-right">
+      <button class="icon-btn" onclick="toggleTheme()" aria-label="Toggle theme">
+        <svg id="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+             style="display:none">
+          <circle cx="12" cy="12" r="5"/>
+          <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+          <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        </svg>
+        <svg id="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <span class="nav-user" id="nav-user"></span>
+      <button class="link-btn muted" onclick="doLogout()">Sign out</button>
+    </div>
+  </nav>
+  <main>
+    <!-- Chats panel -->
+    <div id="chats-panel">
+      <div class="page-header">
+        <h1 class="page-title">Chats</h1>
+        <button class="add-btn" onclick="openAddModal()">Add chat</button>
+      </div>
+      <div id="chat-list"></div>
+    </div>
+
+    <!-- Logs panel -->
+    <div id="logs-panel" style="display:none">
+      <div class="page-header">
+        <h1 class="page-title">Logs</h1>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <label class="auto-label">
+            <input type="checkbox" id="auto-refresh" checked onchange="toggleAutoRefresh(this.checked)">
+            Auto-refresh
+          </label>
+          <button class="add-btn" onclick="loadLogs()">Refresh</button>
+        </div>
+      </div>
+      <div class="log-toolbar">
+        <div class="filter-pills">
+          <button class="filter-pill active" onclick="setTypeFilter(this,'')">All</button>
+          <button class="filter-pill" onclick="setTypeFilter(this,'MSG')">Messages</button>
+          <button class="filter-pill" onclick="setTypeFilter(this,'TOOL')">Tools</button>
+          <button class="filter-pill" onclick="setTypeFilter(this,'ERROR')">Errors</button>
+        </div>
+        <div class="log-right">
+          <input class="log-search" type="text" id="log-user-filter"
+            placeholder="Filter by username…" oninput="renderLogs()">
+        </div>
+      </div>
+      <div id="log-list"></div>
+    </div>
+  </main>
+</div>
+
+<!-- Add Chat Modal -->
+<div class="overlay" id="add-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Chat</span>
+      <button class="modal-x" onclick="closeModal('add-modal')" aria-label="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="mf">
+        <label>Chat ID</label>
+        <input type="text" id="add-chat-id" placeholder="-1004269056589">
+        <div class="hint">Negative for supergroups. Use /chatid in the group to get it.</div>
+      </div>
+      <div class="mf">
+        <label>Topic thread ID <span style="color:var(--t3)">(optional)</span></label>
+        <input type="text" id="add-thread-id" placeholder="4">
+        <div class="hint">Leave blank to respond in all threads.</div>
+      </div>
+      <div class="mf">
+        <label>Name</label>
+        <input type="text" id="add-name" placeholder="My Ops Group">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('add-modal')">Cancel</button>
+      <button class="btn-ok" onclick="doAddChat()">Add</button>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Chat Modal -->
+<div class="overlay" id="edit-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Edit Chat</span>
+      <button class="modal-x" onclick="closeModal('edit-modal')" aria-label="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-chat-id">
+      <div class="mf">
+        <label>Name</label>
+        <input type="text" id="edit-name">
+      </div>
+      <div class="mf">
+        <label>Topic thread ID <span style="color:var(--t3)">(optional)</span></label>
+        <input type="text" id="edit-thread-id">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('edit-modal')">Cancel</button>
+      <button class="btn-ok" onclick="doEditChat()">Save</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const LABELS = {
+  'aws':'AWS','bitbucket':'Bitbucket','grafana':'Grafana',
+  'git-dora':'Git — dora','git-maps':'Git — maps',
+  'git-boots':'Git — boots','git-infra':'Git — infra',
+};
+
+let _cfg = {chats:{}};
+let _groups = [];
+let _logEntries = [];
+let _logType = '';
+let _autoRefreshTimer = null;
+
+async function api(method, path, body) {
+  const o = {method, headers:{}};
+  if (body) { o.headers['Content-Type']='application/json'; o.body=JSON.stringify(body); }
+  const r = await fetch(path, o);
+  if (r.status===401) { showLogin(); return null; }
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+/* ---- View switching ---- */
+function switchView(view) {
+  document.getElementById('chats-panel').style.display = view === 'chats' ? '' : 'none';
+  document.getElementById('logs-panel').style.display  = view === 'logs'  ? '' : 'none';
+  document.getElementById('tab-chats').classList.toggle('active', view === 'chats');
+  document.getElementById('tab-logs').classList.toggle('active',  view === 'logs');
+  if (view === 'logs') {
+    loadLogs();
+    toggleAutoRefresh(document.getElementById('auto-refresh').checked);
+  } else {
+    stopAutoRefresh();
+  }
+}
+
+/* ---- Logs ---- */
+async function loadLogs() {
+  const data = await api('GET', '/api/logs');
+  if (!data) return;
+  _logEntries = data.entries;
+  renderLogs();
+}
+
+function setTypeFilter(btn, type) {
+  document.querySelectorAll('.filter-pill').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  _logType = type;
+  renderLogs();
+}
+
+function renderLogs() {
+  const userQ = (document.getElementById('log-user-filter')?.value || '').toLowerCase();
+  const entries = _logEntries.filter(e =>
+    (!_logType || e.type === _logType) &&
+    (!userQ || (e.username || '').toLowerCase().includes(userQ))
+  );
+  const el = document.getElementById('log-list');
+  if (!entries.length) {
+    el.innerHTML = '<div class="log-empty">No log entries match the current filter.</div>';
+    return;
+  }
+  el.innerHTML = entries.map(e => {
+    const badge = `<span class="log-badge badge-${esc(e.type)}">${esc(e.type)}</span>`;
+    const who = `<div class="log-who"><span class="log-who-name">${esc(e.username||'?')}</span> · ${esc(e.user||'')}</div>`;
+    const detail = `<div class="log-detail">${esc(e.detail||'')}</div>`;
+    const inputs = e.inputs
+      ? `<div class="log-inputs">${esc(JSON.stringify(e.inputs, null, 2))}</div>`
+      : '';
+    const ts = `<div class="log-ts">${esc(e.ts)}</div>`;
+    return `<div class="log-entry">${badge}<div class="log-body">${who}${detail}${inputs}</div>${ts}</div>`;
+  }).join('');
+}
+
+function toggleAutoRefresh(on) {
+  stopAutoRefresh();
+  if (on) _autoRefreshTimer = setInterval(loadLogs, 10000);
+}
+function stopAutoRefresh() {
+  clearInterval(_autoRefreshTimer);
+  _autoRefreshTimer = null;
+}
+
+async function init() {
+  const saved = localStorage.getItem('theme');
+  if (saved) document.documentElement.dataset.theme = saved;
+  updateThemeIcon();
+  try {
+    const r = await fetch('/api/me');
+    if (r.ok) {
+      const d = await r.json();
+      document.getElementById('nav-user').textContent = d.username;
+      showDashboard();
+      await loadConfig();
+    } else showLogin();
+  } catch { showLogin(); }
+}
+
+async function loadConfig() {
+  [_cfg, {groups:_groups}] = await Promise.all([
+    api('GET','/api/config'), api('GET','/api/tools')
+  ]);
+  renderChats();
+}
+
+function renderChats() {
+  const el = document.getElementById('chat-list');
+  const chats = _cfg.chats || {};
+  const ids = Object.keys(chats);
+  if (!ids.length) {
+    el.innerHTML = '<div class="empty"><div class="empty-title">No chats configured</div><div class="empty-sub">Add a chat to get started</div></div>';
+    return;
+  }
+  el.innerHTML = ids.map(cid => {
+    const c = chats[cid];
+    const thread = c.thread_id != null ? `Thread ${c.thread_id}` : 'All threads';
+    const tools = c.tools || {};
+    const toolRows = _groups.map(g => {
+      const on = tools[g] !== false;
+      return `<div class="tool-row">
+        <span class="tool-row-name">${LABELS[g]||g}</span>
+        <label class="toggle">
+          <input type="checkbox" ${on?'checked':''} onchange="toggleTool('${cid}','${g}',this.checked)">
+          <span class="track"></span>
+        </label>
+      </div>`;
+    }).join('');
+    return `<div class="chat-card">
+      <div class="card-header">
+        <div>
+          <div class="card-name">${esc(c.name||cid)}</div>
+          <div class="card-meta">${esc(cid)}<span class="card-meta-thread">· ${esc(thread)}</span></div>
+        </div>
+        <div class="card-actions">
+          <button class="link-btn" onclick="openEditModal('${cid}')">Edit</button>
+          <button class="link-btn danger" onclick="removeChat('${cid}')">Remove</button>
+        </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="tools-section">
+        <div class="tools-label">Tools</div>
+        <div class="tool-rows">${toolRows}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function toggleTool(chatId, group, enabled) {
+  const chat = _cfg.chats[chatId];
+  if (!chat.tools) chat.tools = {};
+  _groups.forEach(g => { if (!(g in chat.tools)) chat.tools[g]=true; });
+  chat.tools[group] = enabled;
+  try {
+    await api('PUT',`/api/chats/${chatId}/tools`,{tools:chat.tools});
+    toast('Saved');
+  } catch { toast('Failed to save',true); await loadConfig(); }
+}
+
+function openAddModal() {
+  ['add-chat-id','add-thread-id','add-name'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('add-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('add-chat-id').focus(),60);
+}
+
+function openEditModal(chatId) {
+  const c = _cfg.chats[chatId];
+  document.getElementById('edit-chat-id').value = chatId;
+  document.getElementById('edit-name').value = c.name||'';
+  document.getElementById('edit-thread-id').value = c.thread_id!=null?c.thread_id:'';
+  document.getElementById('edit-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('edit-name').focus(),60);
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+async function doAddChat() {
+  const chatId   = document.getElementById('add-chat-id').value.trim();
+  const threadId = document.getElementById('add-thread-id').value.trim();
+  const name     = document.getElementById('add-name').value.trim();
+  if (!chatId) return;
+  try {
+    await api('POST','/api/chats',{chat_id:chatId,thread_id:threadId||null,name:name||chatId});
+    closeModal('add-modal');
+    await loadConfig();
+    toast('Chat added');
+  } catch { toast('Failed to add chat',true); }
+}
+
+async function doEditChat() {
+  const chatId   = document.getElementById('edit-chat-id').value;
+  const name     = document.getElementById('edit-name').value.trim();
+  const threadId = document.getElementById('edit-thread-id').value.trim();
+  try {
+    await api('PUT', `/api/chats/${chatId}/info`, {name, thread_id: threadId || null});
+    closeModal('edit-modal');
+    await loadConfig();
+    toast('Saved');
+  } catch { toast('Failed to save', true); }
+}
+
+async function removeChat(chatId) {
+  if (!confirm('Remove this chat?')) return;
+  await api('DELETE',`/api/chats/${chatId}`);
+  await loadConfig();
+  toast('Chat removed');
+}
+
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('login-btn');
+  btn.disabled=true; btn.textContent='Signing in…';
+  const d = new FormData();
+  d.append('username',document.getElementById('username').value);
+  d.append('password',document.getElementById('password').value);
+  const r = await fetch('/api/login',{method:'POST',body:d});
+  if (r.ok) {
+    showDashboard();
+    const me = await api('GET','/api/me');
+    document.getElementById('nav-user').textContent = me.username;
+    await loadConfig();
+  } else {
+    document.getElementById('login-err').textContent='Incorrect username or password';
+    btn.disabled=false; btn.textContent='Sign In';
+  }
+}
+
+async function doLogout() {
+  stopAutoRefresh();
+  await fetch('/api/logout',{method:'POST'});
+  showLogin();
+}
+
+function showLogin() {
+  document.getElementById('login-page').style.display='flex';
+  document.getElementById('dashboard').style.display='none';
+}
+function showDashboard() {
+  document.getElementById('login-page').style.display='none';
+  document.getElementById('dashboard').style.display='flex';
+}
+
+function getTheme() {
+  return document.documentElement.dataset.theme ||
+    (window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+}
+function toggleTheme() {
+  const next = getTheme() === 'dark' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = next;
+  localStorage.setItem('theme', next);
+  updateThemeIcon();
+}
+function updateThemeIcon() {
+  const dark = getTheme()==='dark';
+  document.getElementById('icon-sun').style.display  = dark?'block':'none';
+  document.getElementById('icon-moon').style.display = dark?'none':'block';
+}
+
+document.querySelectorAll('.overlay').forEach(el =>
+  el.addEventListener('click',e=>{ if(e.target===el) el.classList.remove('open'); })
+);
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape') document.querySelectorAll('.overlay.open').forEach(m=>m.classList.remove('open'));
+});
+
+let _toastTimer;
+function toast(msg,err=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'show'+(err?' err':'');
+  clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(()=>el.className='',2500);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+init();
+</script>
+</body>
+</html>

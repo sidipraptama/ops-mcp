@@ -1,0 +1,8 @@
+anthropic
+boto3
+mcp
+python-telegram-bot
+python-dotenv
+fastapi
+uvicorn[standard]
+python-multipart

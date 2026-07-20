@@ -1,3 +1,4 @@
+"""Dev utility: list all tools exposed by the Grafana MCP server."""
 import asyncio
 import os
 from mcp import ClientSession, StdioServerParameters
@@ -6,6 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
 async def main():
     params = StdioServerParameters(
         command=os.path.expanduser("~/.local/bin/uvx"),
@@ -13,10 +15,9 @@ async def main():
         env={
             "GRAFANA_URL": os.getenv("GRAFANA_URL"),
             "GRAFANA_SERVICE_ACCOUNT_TOKEN": os.getenv("GRAFANA_SERVICE_ACCOUNT_TOKEN"),
-            "PATH": os.environ.get("PATH", "")
-        }
+            "PATH": os.environ.get("PATH", ""),
+        },
     )
-
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -26,5 +27,6 @@ async def main():
                 print(f"- {tool.name}")
                 print(f"  {tool.description[:100]}")
                 print()
+
 
 asyncio.run(main())

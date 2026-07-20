@@ -11,16 +11,25 @@ Telegram Group (topic thread #4)
     ↓  @mention or reply
 EC2 (procal-ops) — private subnet + NAT Gateway
     ├── bot.py               ← entry point: Telegram app + startup
-    ├── config.py            ← all env vars and constants
+    ├── admin_panel.py       ← FastAPI admin UI (port 8080)
+    ├── config.py            ← static env vars and constants
+    ├── bot_config.py        ← runtime chat/tool config (~/.ops-bot-config.json)
     ├── mcp_client.py        ← MCP session management (Grafana + Git)
     ├── claude_client.py     ← Claude API, conversation history, prompts
+    ├── audit.py             ← audit trail (log file + Telegram notifications)
     ├── polling.py           ← auto PR review loop (infra repo → main)
     ├── tools/
     │   ├── aws.py           ← EC2, Inspector (boto3) + tool schema definitions
     │   └── bitbucket.py     ← Bitbucket REST API (PRs, comments, branches)
-    └── tg/
-        ├── handlers.py      ← message routing and command handlers
-        └── formatting.py    ← markdown→HTML, message splitting, rate-limit parsing
+    ├── tg/
+    │   ├── handlers.py      ← message routing and command handlers
+    │   └── formatting.py    ← markdown→HTML, message splitting, rate-limit parsing
+    ├── deploy/
+    │   ├── ops-bot.service          ← systemd unit for the bot
+    │   └── ops-bot-admin.service    ← systemd unit for the admin panel
+    └── scripts/
+        ├── setup-server.sh          ← one-time EC2 setup script
+        └── list_tools.py            ← dev utility: inspect MCP tool list
 ```
 
 ### Dependency flow
@@ -121,10 +130,38 @@ Commands work via `@mention /cmd` in groups, or as `/cmd@botname`, or as plain `
 
 ## Group chat behavior
 
-- The bot only responds in chat `-1004269056589`, topic thread `4`
+- The bot responds only in chats configured via the admin panel (default: `-1004269056589`, topic thread `4`)
 - In groups, it responds only when **@mentioned** or when someone **replies** to one of its messages
 - When replying, the bot includes the original message as context for Claude
 - Each user in the group has their own conversation history (keyed by user ID)
+- Chat config is read from `~/.ops-bot-config.json` — changes take effect on the next message (no restart needed)
+
+---
+
+## Admin panel
+
+A web UI for managing which chats the bot operates in and which tool groups are enabled per chat.
+
+### Access
+
+Connect via VPN, then open `http://<EC2-private-ip>:8080`.
+
+Sign in with the credentials from your `.env`:
+```
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<your-password>
+```
+
+### What you can do
+
+| Action | Description |
+|--------|-------------|
+| **Add chat** | Register a new group/supergroup with its topic thread ID |
+| **Remove chat** | Stop the bot from responding in a chat |
+| **Toggle tools** | Enable or disable tool groups (AWS, Bitbucket, Grafana, Git repos) per chat |
+| **Edit chat** | Update display name or change the topic thread |
+
+Changes are saved immediately to `~/.ops-bot-config.json` and picked up by the bot on the next message.
 
 ---
 
@@ -157,8 +194,7 @@ These are read-only — the MCP git server reads the local `.git` directory rega
 ```bash
 cd ~/ops-bot
 python3 -m venv venv
-source venv/bin/activate
-pip install anthropic boto3 mcp python-telegram-bot python-dotenv
+venv/bin/pip install -r requirements.txt
 ```
 
 ### 4. Create `.env`
@@ -179,6 +215,11 @@ GRAFANA_SERVICE_ACCOUNT_TOKEN=glsa_...
 BITBUCKET_USER=your@email.com
 BITBUCKET_APP_PASSWORD=...
 BITBUCKET_WORKSPACE=academytools
+
+# Admin panel
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=changeme
+ADMIN_PORT=8080
 ```
 
 #### Getting each value
@@ -200,62 +241,67 @@ Attach an IAM role to the EC2 instance with:
 - `cloudwatch:GetMetricData`, `cloudwatch:DescribeAlarms`
 - `logs:DescribeLogGroups`, `logs:GetLogEvents`, `logs:FilterLogEvents`
 
-### 6. Run as systemd service
+### 6. Run as systemd services
+
+Service unit files are in `deploy/`. The setup script installs both:
 
 ```bash
-sudo nano /etc/systemd/system/ops-bot.service
+bash ~/ops-bot/scripts/setup-server.sh
 ```
 
-```ini
-[Unit]
-Description=Procal Ops Bot
-After=network.target
+This installs `deploy/ops-bot.service` and `deploy/ops-bot-admin.service`, enables them, and starts both.
 
-[Service]
-User=ubuntu
-WorkingDirectory=/home/ubuntu/ops-bot
-EnvironmentFile=/home/ubuntu/ops-bot/.env
-ExecStart=/home/ubuntu/ops-bot/venv/bin/python bot.py
-Restart=always
-RestartSec=5
-TimeoutStopSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
+To do it manually:
 
 ```bash
+sudo cp ~/ops-bot/deploy/ops-bot.service       /etc/systemd/system/
+sudo cp ~/ops-bot/deploy/ops-bot-admin.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable ops-bot
-sudo systemctl start ops-bot
-sudo systemctl status ops-bot
+sudo systemctl enable --now ops-bot ops-bot-admin
 ```
 
 ### 7. Restart after updates
 
 ```bash
-# fast kill + restart
-pkill -f bot.py; sudo systemctl start ops-bot
-
-# or if TimeoutStopSec=5 is set in the service file
+# bot only
 sudo systemctl restart ops-bot
+
+# admin panel only
+sudo systemctl restart ops-bot-admin
+
+# if restart hangs (old process holds socket)
+pkill -f bot.py && sudo systemctl start ops-bot
 ```
 
 ---
 
 ## File reference
 
+**Application**
+
 | File | Purpose |
 |------|---------|
-| `bot.py` | Entry point. Builds the Telegram app, registers handlers, calls `post_init` on startup |
-| `config.py` | All constants and env vars. Edit here to change allowed chat IDs, poll interval, MCP server paths, etc. |
-| `mcp_client.py` | Connects to Grafana and Git MCP servers at startup. Populates `all_tools` and `tool_to_session` globals used by `claude_client` |
-| `claude_client.py` | `ask_claude()` — the main Claude API call loop with tool dispatch. Manages per-user conversation history and holds both system prompts |
-| `polling.py` | Background asyncio task that watches `procal-infra-3` PRs and auto-reviews new commits |
-| `tools/aws.py` | boto3 EC2 + Inspector queries. Also defines `BOTO3_TOOLS` — the schema list that Claude sees for all local tools |
-| `tools/bitbucket.py` | All Bitbucket REST API calls: PR CRUD, comments, branch creation, file commits |
-| `tg/handlers.py` | `handle_message` routing (allowlist, mention/reply detection, inline command dispatch). All slash command handlers |
-| `tg/formatting.py` | Markdown→Telegram HTML converter, message splitter for 4096-char limit, rate-limit reset-time parser |
+| `bot.py` | Entry point. Builds the Telegram app, registers handlers, seeds config on first run |
+| `bot_config.py` | Loads/saves `~/.ops-bot-config.json`. Source of truth for allowed chats, thread IDs, and per-chat tool groups |
+| `admin_panel.py` | FastAPI web UI (port 8080). Login, chat management, per-chat tool toggles |
+| `config.py` | Static constants and env vars: MCP server paths, poll interval, audit settings |
+| `mcp_client.py` | Connects to Grafana and Git MCP servers at startup. Populates `all_tools`, `tool_to_session`, `tool_group` |
+| `claude_client.py` | `ask_claude()` — Claude API loop with tool dispatch, per-user history, both system prompts |
+| `audit.py` | Appends to `~/.ops-bot-audit.log`. Sends Telegram notifications for write-action tool calls |
+| `polling.py` | Background asyncio task watching `procal-infra-3` → `main` PRs every 5 min |
+| `tools/aws.py` | boto3 EC2 + Inspector. Defines `BOTO3_TOOLS` schema list |
+| `tools/bitbucket.py` | Bitbucket REST API: PR CRUD, comments, branch creation, file commits |
+| `tg/handlers.py` | `handle_message` routing: allowlist, mention/reply detection, inline command dispatch |
+| `tg/formatting.py` | Markdown→Telegram HTML, message splitter (4096-char limit), rate-limit parser |
+
+**Deployment**
+
+| File | Purpose |
+|------|---------|
+| `deploy/ops-bot.service` | systemd unit for the Telegram bot |
+| `deploy/ops-bot-admin.service` | systemd unit for the admin panel |
+| `scripts/setup-server.sh` | One-time EC2 setup: installs deps, registers both systemd units, configures logrotate |
+| `scripts/list_tools.py` | Dev utility: lists all tools available from the Grafana MCP server |
 
 ---
 
@@ -267,7 +313,7 @@ sudo systemctl restart ops-bot
 | `401 AuthenticationError` | Wrong or expired LLM proxy key | Update `LLM_PROXY_KEY` in `.env` |
 | `400 Bitbucket auth error` | Using username instead of email | Set `BITBUCKET_USER` to your account **email** |
 | MCP server times out | `uvx` subprocess hangs on init | Skipped after 30s. Check `~/.local/bin/uvx` exists |
-| Bot not responding in group | Wrong chat/thread ID, or not @mentioned | Use `/chatid` to verify; update `ALLOWED_CHAT_IDS` / `ALLOWED_THREAD_ID` in `config.py` |
+| Bot not responding in group | Wrong chat/thread ID, or not @mentioned | Use `/chatid` to verify; add the chat via the admin panel at `:8080` |
 | `NoCredentialsError` from boto3 | No IAM role attached to EC2 | AWS Console → EC2 → Actions → Security → Modify IAM role |
 | `429 Rate limited` | Shared 100k tokens/min class quota exhausted | Bot retries automatically (3×). Wait for reset or get a personal API key |
 | PR polling not triggering review | Bot restarted within 5-min poll window | Wait 5 min, or push a new commit to the PR |

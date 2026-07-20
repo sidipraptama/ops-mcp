@@ -2,13 +2,156 @@ import json
 import os
 import uuid
 import urllib.request
+import urllib.error
 from base64 import b64encode
 
 from config import BITBUCKET_WORKSPACE, BITBUCKET_USER, BITBUCKET_APP_PASSWORD
 
+BITBUCKET_TOOLS = [
+    {
+        "name": "list_open_prs",
+        "description": "List open pull requests in a Bitbucket repo",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug: dora-learner-3, maps-learner-3, boots-learner-3, procal-infra-3"},
+            },
+            "required": ["repo"],
+        },
+    },
+    {
+        "name": "get_pr_diff",
+        "description": "Get the diff and description of a specific Bitbucket pull request",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "get_pr_comments",
+        "description": "Get comments on a Bitbucket PR, including Atlantis plan output posted as comments",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "post_pr_comment",
+        "description": "Post a comment on a Bitbucket PR. Use this to post review analysis, risk warnings, or trigger Atlantis commands (atlantis plan / atlantis apply).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+                "comment": {"type": "string", "description": "Comment text. To trigger Atlantis: 'atlantis plan' or 'atlantis apply'"},
+            },
+            "required": ["repo", "pr_id", "comment"],
+        },
+    },
+    {
+        "name": "approve_pr",
+        "description": "Formally approve a Bitbucket pull request",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "unapprove_pr",
+        "description": "Remove a previous approval from a Bitbucket pull request",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "request_changes_pr",
+        "description": "Formally request changes on a Bitbucket pull request (blocks merge until resolved)",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "decline_pr",
+        "description": "Decline and close a Bitbucket pull request without merging",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+                "reason": {"type": "string", "description": "Optional reason for declining"},
+            },
+            "required": ["repo", "pr_id"],
+        },
+    },
+    {
+        "name": "delete_pr_comment",
+        "description": "Delete a specific comment from a Bitbucket pull request",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "Pull request ID number"},
+                "comment_id": {"type": "integer", "description": "Comment ID to delete"},
+            },
+            "required": ["repo", "pr_id", "comment_id"],
+        },
+    },
+    {
+        "name": "commit_file_to_new_branch",
+        "description": "Commit a file fix to bot/fix-pr{pr_id} branch. Creates the branch if it doesn't exist, reuses it if it does.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "pr_id": {"type": "integer", "description": "The PR being fixed — used to name the fix branch bot/fix-pr{pr_id}"},
+                "source_branch": {"type": "string", "description": "The PR source branch to fork from if branch doesn't exist yet"},
+                "filepath": {"type": "string", "description": "Repo-relative path of the file to write"},
+                "content": {"type": "string", "description": "Full new content of the file"},
+                "commit_message": {"type": "string", "description": "Commit message"},
+            },
+            "required": ["repo", "pr_id", "source_branch", "filepath", "content", "commit_message"],
+        },
+    },
+    {
+        "name": "create_pr",
+        "description": "Create a new Bitbucket pull request from one branch to another",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "repo": {"type": "string", "description": "Repo slug"},
+                "title": {"type": "string", "description": "PR title"},
+                "source_branch": {"type": "string", "description": "Branch with the changes"},
+                "destination_branch": {"type": "string", "description": "Branch to merge into"},
+                "description": {"type": "string", "description": "PR description"},
+            },
+            "required": ["repo", "title", "source_branch", "destination_branch"],
+        },
+    },
+]
 
-def _auth_token() -> str:
-    return b64encode(f"{BITBUCKET_USER}:{BITBUCKET_APP_PASSWORD}".encode()).decode()
+_AUTH_TOKEN = b64encode(f"{BITBUCKET_USER}:{BITBUCKET_APP_PASSWORD}".encode()).decode()
 
 
 def _build_multipart(fields: dict) -> tuple[bytes, str]:
@@ -27,9 +170,8 @@ def _build_multipart(fields: dict) -> tuple[bytes, str]:
 
 def bitbucket_request(path: str, method: str = "GET", body: bytes = None,
                       content_type: str = "application/json") -> dict:
-    token = _auth_token()
     url = f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{path}"
-    headers = {"Authorization": f"Basic {token}", "Accept": "application/json"}
+    headers = {"Authorization": f"Basic {_AUTH_TOKEN}", "Accept": "application/json"}
     if body is not None:
         headers["Content-Type"] = content_type
     req = urllib.request.Request(url, data=body, method=method, headers=headers)
@@ -60,12 +202,11 @@ def bitbucket_tool(name: str, inputs: dict) -> str:
     if name == "get_pr_diff":
         pr_id = inputs["pr_id"]
         pr = bitbucket_request(f"{repo}/pullrequests/{pr_id}")
-        token = _auth_token()
         diff_url = (
             f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}"
             f"/{repo}/pullrequests/{pr_id}/diff"
         )
-        req = urllib.request.Request(diff_url, headers={"Authorization": f"Basic {token}"})
+        req = urllib.request.Request(diff_url, headers={"Authorization": f"Basic {_AUTH_TOKEN}"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             diff = resp.read().decode(errors="replace")[:3000]
         return json.dumps({
@@ -147,19 +288,20 @@ def bitbucket_tool(name: str, inputs: dict) -> str:
         try:
             bitbucket_request(f"{repo}/refs/branches/{fix_branch}")
             is_new = False
-        except Exception:
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
             branch_data = bitbucket_request(f"{repo}/refs/branches/{source_branch}")
             fields["parents"] = branch_data["target"]["hash"]
             is_new = True
 
         body, content_type = _build_multipart(fields)
-        token = _auth_token()
         url = (
             f"https://api.bitbucket.org/2.0/repositories/{BITBUCKET_WORKSPACE}/{repo}/src"
         )
         req = urllib.request.Request(
             url, data=body, method="POST",
-            headers={"Authorization": f"Basic {token}", "Content-Type": content_type},
+            headers={"Authorization": f"Basic {_AUTH_TOKEN}", "Content-Type": content_type},
         )
         with urllib.request.urlopen(req, timeout=15) as r:
             r.read()

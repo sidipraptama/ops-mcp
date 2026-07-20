@@ -3,18 +3,16 @@ import html
 import json
 from datetime import datetime, timezone
 
+import bot_config
 from claude_client import claude
-from config import (
-    ALLOWED_CHAT_IDS, ALLOWED_THREAD_ID,
-    POLL_REPO, POLL_TARGET_BRANCH, POLL_INTERVAL,
-)
+from config import POLL_REPO, POLL_TARGET_BRANCH, POLL_INTERVAL
 from tools.bitbucket import bitbucket_request, bitbucket_tool
 
 import os
 
 _PR_STATE_FILE = os.path.expanduser("~/.ops-bot-pr-state.json")
 _pr_seen: dict[str, str] = {}  # {pr_id: commit_sha}
-_bot_started_at: str = datetime.now(timezone.utc).isoformat()
+_bot_started_at = datetime.now(timezone.utc)
 
 INFRA_REVIEW_PROMPT = """You are a Terraform infrastructure reviewer.
 Analyze this pull request diff targeting the main branch and give a concise review.
@@ -65,7 +63,7 @@ async def _auto_review_infra_pr(bot, pr_id: int, pr_data: dict, commit_sha: str)
             f"Author: {pr_data['author']['display_name']}\n"
             f"Branch: {pr_data['source']['branch']['name']} → {POLL_TARGET_BRANCH}\n"
             f"Commit: {commit_sha[:8]}\n\n"
-            f"Diff:\n{diff.get('diff', '')[:4000]}"
+            f"Diff:\n{diff.get('diff', '')}"
         )
         system = INFRA_REVIEW_PROMPT.replace("{pr_id}", str(pr_id)).replace("{sha}", commit_sha[:8])
         response = claude.messages.create(
@@ -86,9 +84,9 @@ async def _auto_review_infra_pr(bot, pr_id: int, pr_data: dict, commit_sha: str)
                 f"New commit: <code>{commit_sha[:8]}</code>\n"
                 f"<a href='{pr_url}'>View PR</a>"
             )
-            for cid in ALLOWED_CHAT_IDS:
+            for cid, thread_id in bot_config.get_allowed_chats().items():
                 await bot.send_message(cid, notif, parse_mode="HTML",
-                                       message_thread_id=ALLOWED_THREAD_ID)
+                                       message_thread_id=thread_id)
 
         print(f"Auto-reviewed PR #{pr_id} (commit {commit_sha[:8]})")
     except Exception as e:
@@ -114,7 +112,7 @@ async def poll_infra_prs(bot) -> None:
                     _pr_seen[pr_id] = commit_sha
                     _save_pr_state()
                     pr_created = pr.get("created_on", "")
-                    if pr_created > _bot_started_at:
+                    if datetime.fromisoformat(pr_created.replace("Z", "+00:00")) > _bot_started_at:
                         print(f"New PR #{pr_id} opened after bot start — reviewing")
                         await _auto_review_infra_pr(bot, int(pr_id), pr, commit_sha)
                     else:

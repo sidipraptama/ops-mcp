@@ -3,6 +3,7 @@ import os
 
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 
+import bot_config
 from mcp_client import init_mcp
 from polling import poll_infra_prs
 from tg.handlers import (
@@ -15,6 +16,7 @@ from tg.handlers import (
 
 
 async def post_init(application) -> None:
+    bot_config.seed_defaults()
     await init_mcp()
     asyncio.create_task(poll_infra_prs(application.bot))
 

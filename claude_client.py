@@ -1,11 +1,13 @@
+import asyncio
 import os
 
 import anthropic
 
 import audit
+import bot_config
 import mcp_client
 from config import MAX_HISTORY
-from tools import BOTO3_TOOLS, run_boto3_tool
+from tools import ALL_TOOLS, BITBUCKET_TOOL_NAMES, run_tool
 
 claude = anthropic.Anthropic(
     api_key=os.getenv("LLM_PROXY_KEY"),
@@ -16,11 +18,22 @@ claude = anthropic.Anthropic(
 _history: dict[int, list] = {}
 
 # ── Persona mode ──────────────────────────────────────────────────────────────
-tsim_mode: bool = False
+_tsim: dict[int, bool] = {}
+
+
+def is_tsim(key: int) -> bool:
+    return _tsim.get(key, False)
+
+
+def set_tsim(key: int, enabled: bool) -> None:
+    _tsim[key] = enabled
+
+
+def clear_history(key: int) -> None:
+    _history.pop(key, None)
 
 # ── System prompts ────────────────────────────────────────────────────────────
-SYSTEM_PROMPT = """You are a DevOps assistant for the procal infrastructure team.
-You have access to AWS (EC2, Inspector), Grafana (logs, metrics, incidents, traces), and Git (codebase history) tools.
+_SYSTEM_PROMPT_BASE = """You are a DevOps assistant for the procal infrastructure team.
 
 Services in this infra:
 - dora: Python FastAPI backend (git tools: dora_git_*)
@@ -93,7 +106,29 @@ Destructive ops: "no.", "not happening."
 Out of scope: "not my problem.", "do it yourself."
 """
 
-_BOTO3_TOOL_NAMES = {t["name"] for t in BOTO3_TOOLS}
+_LOCAL_TOOL_NAMES = {t["name"] for t in ALL_TOOLS}
+
+_MAX_TOOL_ITERS = 20
+
+
+def _build_system_prompt(enabled: set[str]) -> str:
+    parts = []
+    if "aws" in enabled:
+        parts.append("AWS (EC2, Inspector)")
+    if "grafana" in enabled:
+        parts.append("Grafana (Loki logs, Prometheus metrics, Tempo traces, incidents)")
+    if "bitbucket" in enabled:
+        parts.append("Bitbucket (PRs, comments, branches)")
+    git_repos = [g.replace("git-", "") for g in bot_config.ALL_TOOL_GROUPS if g.startswith("git-") and g in enabled]
+    if git_repos:
+        parts.append(f"Git history ({', '.join(git_repos)} repos)")
+
+    if parts:
+        tools_line = "You have access to: " + ", ".join(parts) + "."
+    else:
+        tools_line = "You currently have no tools enabled. Tell the user to enable tools in the admin panel."
+
+    return tools_line + "\n\n" + _SYSTEM_PROMPT_BASE
 
 
 def _sanitize_history(messages: list) -> list:
@@ -113,7 +148,7 @@ def _sanitize_history(messages: list) -> list:
 
 async def ask_claude(user_message: str, history_key: int,
                      user_id: int = 0, username: str = "unknown",
-                     bot=None) -> str:
+                     bot=None, chat_id: int = 0) -> str:
     audit.log_message(user_id, username, user_message)
 
     history = _history.setdefault(history_key, [])
@@ -126,12 +161,21 @@ async def ask_claude(user_message: str, history_key: int,
 
     messages = list(history)
 
+    _iter = 0
     while True:
+        _iter += 1
+        if _iter > _MAX_TOOL_ITERS:
+            return "⚠️ Reached tool call limit. Please try a more specific request."
+
+        enabled = bot_config.get_tools_for_chat(chat_id)
+        tools = mcp_client.filter_tools(enabled)
+        system = TSIM_PROMPT if is_tsim(history_key) else _build_system_prompt(enabled)
+
         response = claude.messages.create(
             model="claude-haiku",
             max_tokens=1024,
-            system=TSIM_PROMPT if tsim_mode else SYSTEM_PROMPT,
-            tools=mcp_client.all_tools,
+            system=system,
+            tools=tools,
             messages=messages,
         )
 
@@ -151,16 +195,19 @@ async def ask_claude(user_message: str, history_key: int,
                 if block.type == "tool_use":
                     audit.log_tool(user_id, username, block.name, dict(block.input))
                     try:
-                        if block.name in _BOTO3_TOOL_NAMES:
-                            result = run_boto3_tool(block.name, block.input)
+                        if block.name in _LOCAL_TOOL_NAMES:
+                            result = await asyncio.to_thread(run_tool, block.name, dict(block.input))
                         else:
                             session, original_name = mcp_client.tool_to_session[block.name]
                             result = str((await session.call_tool(original_name, block.input)).content)
-                        if block.name in audit.WRITE_TOOLS:
-                            await audit.notify_write(bot, user_id, username, block.name, dict(block.input))
                     except Exception as e:
                         audit.log_tool_error(user_id, username, block.name, str(e))
                         result = f"Tool error: {e}"
+                    if block.name in audit.WRITE_TOOLS:
+                        try:
+                            await audit.notify_write(bot, user_id, username, block.name, dict(block.input))
+                        except Exception:
+                            pass
 
                     tool_results.append({
                         "type": "tool_result",

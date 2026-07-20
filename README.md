@@ -179,6 +179,7 @@ ADMIN_PASSWORD=<your-password>
 | **Toggle tools** | Enable or disable tool groups (AWS, Bitbucket, Grafana, Git repos) per chat |
 | **Edit chat** | Update display name or change the topic thread |
 | **Logs tab** | View the audit log (messages, tool calls, errors) with type and username filters. Auto-refreshes every 10s. |
+| **Settings tab** | Configure the Telegram destination for audit notifications (chat ID + thread ID). Saved to `~/.ops-bot-config.json` and takes effect immediately — no restart needed. |
 
 Changes are saved immediately to `~/.ops-bot-config.json` and picked up by the bot on the next message.
 
@@ -239,6 +240,10 @@ BITBUCKET_WORKSPACE=academytools
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=<strong-password>   # required — bot refuses to start without this
 ADMIN_PORT=8080
+
+# Audit notifications (optional startup defaults — can also be set via the admin panel Settings tab)
+# AUDIT_CHAT_ID=-1004269056589
+# AUDIT_THREAD_ID=4
 ```
 
 #### Getting each value
@@ -306,7 +311,7 @@ pkill -f bot.py && sudo systemctl start ops-bot
 | `config.py` | Static constants and env vars: MCP server paths, poll interval, audit settings |
 | `mcp_client.py` | Connects to Grafana and Git MCP servers at startup. Populates `all_tools`, `tool_to_session`, `tool_group` |
 | `claude_client.py` | `ask_claude()` — Claude API loop with tool dispatch, per-user history, both system prompts |
-| `audit.py` | Appends to `~/.ops-bot-audit.log`. Sends Telegram notifications for write-action tool calls |
+| `audit.py` | Appends to `~/.ops-bot-audit.log`. Sends Telegram notifications for write-action tool calls. Destination read from `bot_config` at call time (configurable via admin panel). |
 | `polling.py` | Background asyncio task watching `procal-infra-3` → `main` PRs every 5 min |
 | `tools/__init__.py` | Unified tool registry: `ALL_TOOLS`, `BITBUCKET_TOOL_NAMES`, `run_tool()` dispatcher |
 | `tools/aws.py` | boto3 EC2 + Inspector: `AWS_TOOLS` schemas and executor |

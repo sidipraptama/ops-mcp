@@ -401,8 +401,9 @@ main {
     <div class="nav-left">
       <span class="nav-title">Ops Bot</span>
       <div class="nav-sections">
-        <button class="nav-section active" id="tab-chats" onclick="switchView('chats')">Chats</button>
-        <button class="nav-section" id="tab-logs"  onclick="switchView('logs')">Logs</button>
+        <button class="nav-section active" id="tab-chats"    onclick="switchView('chats')">Chats</button>
+        <button class="nav-section"        id="tab-logs"     onclick="switchView('logs')">Logs</button>
+        <button class="nav-section"        id="tab-settings" onclick="switchView('settings')">Settings</button>
       </div>
     </div>
     <div class="nav-right">
@@ -433,6 +434,38 @@ main {
         <button class="add-btn" onclick="openAddModal()">Add chat</button>
       </div>
       <div id="chat-list"></div>
+    </div>
+
+    <!-- Settings panel -->
+    <div id="settings-panel" style="display:none">
+      <div class="page-header">
+        <h1 class="page-title">Settings</h1>
+      </div>
+      <div class="chat-card">
+        <div class="card-header">
+          <div>
+            <div class="card-name">Audit Notifications</div>
+            <div class="card-meta">Telegram destination for write-action alerts</div>
+          </div>
+          <div class="card-actions">
+            <button class="btn-ok" onclick="saveAuditConfig()" style="font-size:13px;padding:7px 16px;">Save</button>
+          </div>
+        </div>
+        <div class="card-divider"></div>
+        <div class="tools-section">
+          <div class="tools-label">Notification target</div>
+          <div class="mf">
+            <label>Chat ID</label>
+            <input type="text" id="audit-chat-id" placeholder="-1004269056589">
+            <div class="hint">The Telegram chat that receives audit notifications.</div>
+          </div>
+          <div class="mf">
+            <label>Thread ID <span style="color:var(--t3)">(optional)</span></label>
+            <input type="text" id="audit-thread-id" placeholder="4">
+            <div class="hint">Topic thread ID. Leave blank to disable audit notifications.</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- Logs panel -->
@@ -545,16 +578,39 @@ async function api(method, path, body) {
 
 /* ---- View switching ---- */
 function switchView(view) {
-  document.getElementById('chats-panel').style.display = view === 'chats' ? '' : 'none';
-  document.getElementById('logs-panel').style.display  = view === 'logs'  ? '' : 'none';
-  document.getElementById('tab-chats').classList.toggle('active', view === 'chats');
-  document.getElementById('tab-logs').classList.toggle('active',  view === 'logs');
+  document.getElementById('chats-panel').style.display    = view === 'chats'    ? '' : 'none';
+  document.getElementById('logs-panel').style.display     = view === 'logs'     ? '' : 'none';
+  document.getElementById('settings-panel').style.display = view === 'settings' ? '' : 'none';
+  document.getElementById('tab-chats').classList.toggle('active',    view === 'chats');
+  document.getElementById('tab-logs').classList.toggle('active',     view === 'logs');
+  document.getElementById('tab-settings').classList.toggle('active', view === 'settings');
   if (view === 'logs') {
     loadLogs();
     toggleAutoRefresh(document.getElementById('auto-refresh').checked);
   } else {
     stopAutoRefresh();
   }
+  if (view === 'settings') loadAuditConfig();
+}
+
+/* ---- Audit config ---- */
+async function loadAuditConfig() {
+  const d = await api('GET', '/api/audit');
+  if (!d) return;
+  document.getElementById('audit-chat-id').value   = d.chat_id   != null ? d.chat_id   : '';
+  document.getElementById('audit-thread-id').value = d.thread_id != null ? d.thread_id : '';
+}
+
+async function saveAuditConfig() {
+  const chatId   = document.getElementById('audit-chat-id').value.trim();
+  const threadId = document.getElementById('audit-thread-id').value.trim();
+  try {
+    await api('PUT', '/api/audit', {
+      chat_id:   chatId   ? parseInt(chatId)   : null,
+      thread_id: threadId ? parseInt(threadId) : null,
+    });
+    toast('Saved');
+  } catch { toast('Failed to save', true); }
 }
 
 /* ---- Logs ---- */

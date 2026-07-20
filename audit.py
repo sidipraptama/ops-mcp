@@ -1,7 +1,7 @@
 import json
 from datetime import datetime, timezone
 
-from config import AUDIT_LOG_FILE, AUDIT_CHAT_ID, AUDIT_THREAD_ID
+from config import AUDIT_LOG_FILE
 
 # Tools that mutate state — these get a Telegram notification
 WRITE_TOOLS: set[str] = {
@@ -50,7 +50,14 @@ def log_tool_error(user_id: int, username: str, tool: str, error: str) -> None:
 
 
 async def notify_write(bot, user_id: int, username: str, tool: str, inputs: dict) -> None:
-    if AUDIT_THREAD_ID is None or bot is None:
+    if bot is None:
+        return
+    import bot_config
+    audit_cfg = bot_config.get_audit_config()
+    chat_id   = audit_cfg["chat_id"]
+    thread_id = audit_cfg["thread_id"]
+
+    if chat_id is None or thread_id is None:
         return
 
     repo = inputs.get("repo", "?")
@@ -76,9 +83,9 @@ async def notify_write(bot, user_id: int, username: str, tool: str, inputs: dict
     )
     try:
         await bot.send_message(
-            AUDIT_CHAT_ID, text,
+            chat_id, text,
             parse_mode="HTML",
-            message_thread_id=AUDIT_THREAD_ID,
+            message_thread_id=thread_id,
         )
     except Exception:
         pass

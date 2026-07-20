@@ -83,6 +83,24 @@ def update_chat_info(chat_id: int, name: str, thread_id: int | None) -> None:
             save(config)
 
 
+def get_audit_config() -> dict:
+    """Returns {'chat_id': int|None, 'thread_id': int|None}, falling back to config.py values."""
+    from config import AUDIT_CHAT_ID, AUDIT_THREAD_ID
+    cfg = load()
+    audit = cfg.get("audit", {})
+    return {
+        "chat_id":   audit.get("chat_id",   AUDIT_CHAT_ID),
+        "thread_id": audit.get("thread_id", AUDIT_THREAD_ID),
+    }
+
+
+def set_audit_config(chat_id: int | None, thread_id: int | None) -> None:
+    with _lock:
+        config = load()
+        config["audit"] = {"chat_id": chat_id, "thread_id": thread_id}
+        save(config)
+
+
 def seed_defaults() -> None:
     """Seed config with the initial chat if the config file doesn't exist yet."""
     if os.path.exists(CONFIG_FILE):

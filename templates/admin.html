@@ -208,6 +208,28 @@ main {
 .toggle input:checked+.track           { background:var(--green); }
 .toggle input:checked+.track::after   { transform:translateX(18px); }
 
+/* -- Thread pills -------------------------------------------------- */
+.thread-pills { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:16px 28px 20px; }
+.thread-pill {
+  display:inline-flex; align-items:center; gap:5px;
+  background:var(--surf2); border:1px solid var(--border);
+  border-radius:100px; padding:4px 12px;
+  font-family:'SF Mono',ui-monospace,monospace; font-size:13px; color:var(--t1);
+}
+.thread-pill-x {
+  background:none; border:none; cursor:pointer; padding:0;
+  color:var(--t3); font-size:15px; line-height:1; transition:color .15s;
+}
+.thread-pill-x:hover { color:var(--red); }
+.thread-all { font-size:13px; color:var(--t2); }
+.thread-add {
+  background:none; border:1px dashed var(--border);
+  border-radius:100px; padding:4px 14px;
+  font-family:inherit; font-size:13px; color:var(--t2);
+  cursor:pointer; transition:all .15s;
+}
+.thread-add:hover { border-color:var(--accent); color:var(--accent); }
+
 /* -- Card footer --------------------------------------------------- */
 .card-footer { padding:0 28px 20px; }
 
@@ -540,14 +562,32 @@ main {
         <label>Name</label>
         <input type="text" id="edit-name">
       </div>
-      <div class="mf">
-        <label>Topic thread ID <span style="color:var(--t3)">(optional)</span></label>
-        <input type="text" id="edit-thread-id">
-      </div>
     </div>
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeModal('edit-modal')">Cancel</button>
       <button class="btn-ok" onclick="doEditChat()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Thread Modal -->
+<div class="overlay" id="add-thread-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Thread</span>
+      <button class="modal-x" onclick="closeModal('add-thread-modal')" aria-label="Close">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="add-thread-chat-id">
+      <div class="mf">
+        <label>Thread ID</label>
+        <input type="text" id="add-thread-id-val" placeholder="4">
+        <div class="hint">Topic thread ID from the Telegram group. Use /chatid to find it.</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('add-thread-modal')">Cancel</button>
+      <button class="btn-ok" onclick="doAddThread()">Add</button>
     </div>
   </div>
 </div>
@@ -692,8 +732,13 @@ function renderChats() {
   }
   el.innerHTML = ids.map(cid => {
     const c = chats[cid];
-    const thread = c.thread_id != null ? `Thread ${c.thread_id}` : 'All threads';
+    const tids = c.thread_ids || (c.thread_id != null ? [c.thread_id] : []);
     const tools = c.tools || {};
+    const pillsHtml = tids.length
+      ? tids.map(t => `<span class="thread-pill">Thread ${esc(t)}
+          <button class="thread-pill-x" onclick="doRemoveThread('${cid}',${t})" aria-label="Remove thread ${t}">&#x2715;</button>
+        </span>`).join('')
+      : `<span class="thread-all">All threads</span>`;
     const toolRows = _groups.map(g => {
       const on = tools[g] !== false;
       return `<div class="tool-row">
@@ -708,12 +753,17 @@ function renderChats() {
       <div class="card-header">
         <div>
           <div class="card-name">${esc(c.name||cid)}</div>
-          <div class="card-meta">${esc(cid)}<span class="card-meta-thread">· ${esc(thread)}</span></div>
+          <div class="card-meta">${esc(cid)}</div>
         </div>
         <div class="card-actions">
           <button class="link-btn" onclick="openEditModal('${cid}')">Edit</button>
           <button class="link-btn danger" onclick="removeChat('${cid}')">Remove</button>
         </div>
+      </div>
+      <div class="card-divider"></div>
+      <div class="thread-pills">
+        ${pillsHtml}
+        <button class="thread-add" onclick="openAddThreadModal('${cid}')">+ Add thread</button>
       </div>
       <div class="card-divider"></div>
       <div class="tools-section">
@@ -745,9 +795,15 @@ function openEditModal(chatId) {
   const c = _cfg.chats[chatId];
   document.getElementById('edit-chat-id').value = chatId;
   document.getElementById('edit-name').value = c.name||'';
-  document.getElementById('edit-thread-id').value = c.thread_id!=null?c.thread_id:'';
   document.getElementById('edit-modal').classList.add('open');
   setTimeout(()=>document.getElementById('edit-name').focus(),60);
+}
+
+function openAddThreadModal(chatId) {
+  document.getElementById('add-thread-chat-id').value = chatId;
+  document.getElementById('add-thread-id-val').value = '';
+  document.getElementById('add-thread-modal').classList.add('open');
+  setTimeout(()=>document.getElementById('add-thread-id-val').focus(),60);
 }
 
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
@@ -766,15 +822,38 @@ async function doAddChat() {
 }
 
 async function doEditChat() {
-  const chatId   = document.getElementById('edit-chat-id').value;
-  const name     = document.getElementById('edit-name').value.trim();
-  const threadId = document.getElementById('edit-thread-id').value.trim();
+  const chatId = document.getElementById('edit-chat-id').value;
+  const name   = document.getElementById('edit-name').value.trim();
   try {
-    await api('PUT', `/api/chats/${chatId}/info`, {name, thread_id: threadId || null});
+    await api('PUT', `/api/chats/${chatId}/info`, {name});
     closeModal('edit-modal');
     await loadConfig();
     toast('Saved');
   } catch { toast('Failed to save', true); }
+}
+
+async function doAddThread() {
+  const chatId   = document.getElementById('add-thread-chat-id').value;
+  const threadId = document.getElementById('add-thread-id-val').value.trim();
+  if (!threadId) return;
+  try {
+    await api('POST', '/api/chats', {
+      chat_id: chatId,
+      thread_id: parseInt(threadId),
+      name: _cfg.chats[chatId]?.name || chatId,
+    });
+    closeModal('add-thread-modal');
+    await loadConfig();
+    toast('Thread added');
+  } catch { toast('Failed to add thread', true); }
+}
+
+async function doRemoveThread(chatId, threadId) {
+  try {
+    await api('DELETE', `/api/chats/${chatId}/threads/${threadId}`);
+    await loadConfig();
+    toast('Thread removed');
+  } catch { toast('Failed to remove thread', true); }
 }
 
 async function removeChat(chatId) {

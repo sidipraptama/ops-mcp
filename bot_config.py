@@ -31,10 +31,18 @@ def save(config: dict) -> None:
             json.dump(config, f, indent=2)
 
 
-def get_allowed_chats() -> dict[int, int | None]:
-    """Returns {chat_id: thread_id} for all configured chats."""
+def _thread_ids(chat: dict) -> list[int]:
+    """Normalize old thread_id (int|None) to thread_ids (list[int])."""
+    if "thread_ids" in chat:
+        return chat["thread_ids"]
+    old = chat.get("thread_id")
+    return [old] if old is not None else []
+
+
+def get_allowed_chats() -> dict[int, list[int]]:
+    """Returns {chat_id: [thread_ids]} where empty list means all threads."""
     return {
-        int(cid): chat.get("thread_id")
+        int(cid): _thread_ids(chat)
         for cid, chat in load().get("chats", {}).items()
     }
 
@@ -49,12 +57,32 @@ def get_tools_for_chat(chat_id: int) -> set[str]:
 def add_chat(chat_id: int, thread_id: int | None, name: str) -> None:
     with _lock:
         config = load()
-        config.setdefault("chats", {})[str(chat_id)] = {
-            "name": name,
-            "thread_id": thread_id,
-            "tools": dict(_DEFAULT_TOOLS),
-        }
+        chats = config.setdefault("chats", {})
+        key = str(chat_id)
+        if key in chats:
+            existing = chats[key]
+            tids = _thread_ids(existing)
+            if thread_id is not None and thread_id not in tids:
+                tids.append(thread_id)
+            existing["thread_ids"] = tids
+            existing.pop("thread_id", None)
+        else:
+            chats[key] = {
+                "name": name,
+                "thread_ids": [thread_id] if thread_id is not None else [],
+                "tools": dict(_DEFAULT_TOOLS),
+            }
         save(config)
+
+
+def remove_thread(chat_id: int, thread_id: int) -> None:
+    with _lock:
+        config = load()
+        chat = config.get("chats", {}).get(str(chat_id))
+        if chat:
+            chat["thread_ids"] = [t for t in _thread_ids(chat) if t != thread_id]
+            chat.pop("thread_id", None)
+            save(config)
 
 
 def remove_chat(chat_id: int) -> None:
@@ -73,13 +101,12 @@ def update_tools(chat_id: int, tools: dict[str, bool]) -> None:
             save(config)
 
 
-def update_chat_info(chat_id: int, name: str, thread_id: int | None) -> None:
+def update_chat_info(chat_id: int, name: str) -> None:
     with _lock:
         config = load()
         chat = config.get("chats", {}).get(str(chat_id))
         if chat:
             chat["name"] = name
-            chat["thread_id"] = thread_id
             save(config)
 
 
@@ -102,7 +129,6 @@ def set_audit_config(chat_id: int | None, thread_id: int | None) -> None:
 
 
 def seed_defaults() -> None:
-    """Seed config with the initial chat if the config file doesn't exist yet."""
     if os.path.exists(CONFIG_FILE):
         return
     from config import AUDIT_CHAT_ID

@@ -84,9 +84,10 @@ async def _auto_review_infra_pr(bot, pr_id: int, pr_data: dict, commit_sha: str)
                 f"New commit: <code>{commit_sha[:8]}</code>\n"
                 f"<a href='{pr_url}'>View PR</a>"
             )
-            for cid, thread_id in bot_config.get_allowed_chats().items():
-                await bot.send_message(cid, notif, parse_mode="HTML",
-                                       message_thread_id=thread_id)
+            for cid, thread_ids in bot_config.get_allowed_chats().items():
+                for tid in (thread_ids or [None]):
+                    await bot.send_message(cid, notif, parse_mode="HTML",
+                                           message_thread_id=tid)
 
         print(f"Auto-reviewed PR #{pr_id} (commit {commit_sha[:8]})")
     except Exception as e:

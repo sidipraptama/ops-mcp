@@ -105,8 +105,13 @@ async def update_tools(chat_id: int, body: dict, _=Depends(require_auth)):
 
 @app.put("/api/chats/{chat_id}/info")
 async def update_info(chat_id: int, body: dict, _=Depends(require_auth)):
-    thread_id = int(body["thread_id"]) if body.get("thread_id") not in (None, "", 0) else None
-    bot_config.update_chat_info(chat_id, body.get("name", str(chat_id)), thread_id)
+    bot_config.update_chat_info(chat_id, body.get("name", str(chat_id)))
+    return {"ok": True}
+
+
+@app.delete("/api/chats/{chat_id}/threads/{thread_id}")
+async def remove_thread(chat_id: int, thread_id: int, _=Depends(require_auth)):
+    bot_config.remove_thread(chat_id, thread_id)
     return {"ok": True}
 
 

@@ -54,9 +54,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if chat_id not in allowed_chats:
         return
 
-    expected_thread = allowed_chats[chat_id]
+    allowed_threads = allowed_chats[chat_id]
     thread_id = update.message.message_thread_id if update.message else None
-    if expected_thread is not None and thread_id != expected_thread:
+    if allowed_threads and thread_id not in allowed_threads:
         return
 
     # groups: respond only on @mention or reply to bot

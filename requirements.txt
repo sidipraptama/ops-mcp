@@ -1,5 +1,4 @@
 anthropic
-boto3
 mcp
 python-telegram-bot
 python-dotenv

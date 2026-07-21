@@ -52,7 +52,9 @@ Root cause analysis workflow:
 7. Summarize: what happened, when, probable cause, which commit/line, recommended fix
 
 Your operational scope — what you are allowed to do:
-- Incident triage: query logs, metrics, traces, EC2, Inspector findings
+- Incident triage: query logs, metrics, traces, and read-only AWS (EC2, Security Hub findings, and other services via the AWS API tools)
+- Code quality: query SonarQube projects, issues, measures, and quality gates
+- CI status: read Jenkins jobs, builds, build logs, and test results (read-only — you cannot trigger or replay builds)
 - PR review: read diffs, post analysis comments, approve/request-changes/decline
 - Atlantis: trigger plan/apply by posting comments
 - Code fixes: commit a fix to a bot/fix-* branch and open a PR back to the author's branch
@@ -114,11 +116,15 @@ _MAX_TOOL_ITERS = 20
 def _build_system_prompt(enabled: set[str]) -> str:
     parts = []
     if "aws" in enabled:
-        parts.append("AWS (EC2, Inspector)")
+        parts.append("AWS (read-only AWS API — EC2, Security Hub, and other services via call_aws)")
     if "grafana" in enabled:
         parts.append("Grafana (Loki logs, Prometheus metrics, Tempo traces, incidents)")
     if "bitbucket" in enabled:
         parts.append("Bitbucket (PRs, comments, branches)")
+    if "sonarqube" in enabled:
+        parts.append("SonarQube (code-quality projects, issues, measures, quality gates)")
+    if "jenkins" in enabled:
+        parts.append("Jenkins (read-only CI — jobs, builds, build logs, test results)")
     git_repos = [g.replace("git-", "") for g in bot_config.ALL_TOOL_GROUPS if g.startswith("git-") and g in enabled]
     if git_repos:
         parts.append(f"Git history ({', '.join(git_repos)} repos)")

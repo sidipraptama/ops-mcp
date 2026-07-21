@@ -6,7 +6,7 @@ CONFIG_FILE = os.path.expanduser("~/.ops-bot-config.json")
 _lock = RLock()
 
 ALL_TOOL_GROUPS = [
-    "aws", "bitbucket", "grafana",
+    "aws", "bitbucket", "grafana", "sonarqube", "jenkins",
     "git-dora", "git-maps", "git-boots", "git-infra",
 ]
 

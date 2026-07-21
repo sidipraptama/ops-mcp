@@ -45,21 +45,45 @@ def _server_meta(name: str) -> tuple[set[str], str, str]:
 
 
 def _slim_schema(input_schema: dict) -> dict:
-    """Truncate param descriptions to reduce token overhead per tool call."""
+    """Strip tool schemas down to the minimum Claude needs to call them."""
     props = input_schema.get("properties") or {}
     slim_props = {}
     for prop_name, prop_val in props.items():
         slim = {"type": prop_val.get("type", "string")}
-        if "enum" in prop_val:
-            slim["enum"] = prop_val["enum"]
         if "description" in prop_val:
-            slim["description"] = prop_val["description"][:60]
+            slim["description"] = prop_val["description"][:80]
+        enum = prop_val.get("enum", [])
+        if 0 < len(enum) <= 20:
+            slim["enum"] = enum
+        # drop enums larger than 20 — AWS service lists etc. are too large
         slim_props[prop_name] = slim
     return {
         "type": "object",
         "properties": slim_props,
         **({"required": input_schema["required"]} if "required" in input_schema else {}),
     }
+
+
+# Hand-written minimal schemas for tools whose auto-generated schemas are huge
+# (e.g. awslabs AWS MCP enumerates every AWS operation in its schema).
+_SCHEMA_OVERRIDES: dict[str, dict] = {
+    "call_aws": {
+        "type": "object",
+        "properties": {
+            "service":    {"type": "string", "description": "AWS service name e.g. ec2, securityhub, rds"},
+            "operation":  {"type": "string", "description": "Operation e.g. describe_instances, get_findings"},
+            "parameters": {"type": "object", "description": "Operation parameters as key-value pairs"},
+        },
+        "required": ["service", "operation"],
+    },
+    "suggest_aws_commands": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Natural language of what AWS action you need"},
+        },
+        "required": ["query"],
+    },
+}
 
 
 def _register(name: str, session: ClientSession, result) -> None:
@@ -71,10 +95,11 @@ def _register(name: str, session: ClientSession, result) -> None:
         if tool.name in whitelist:
             tool_key = prefix + tool.name
             desc_prefix = f"[{prefix.rstrip('_')} repo] " if is_git else ""
+            schema = _SCHEMA_OVERRIDES.get(tool.name) or _slim_schema(tool.inputSchema)
             all_tools.append({
                 "name": tool_key,
                 "description": (desc_prefix + (tool.description or ""))[:120],
-                "input_schema": _slim_schema(tool.inputSchema),
+                "input_schema": schema,
             })
             tool_to_session[tool_key] = (session, tool.name)
             tool_group[tool_key] = group

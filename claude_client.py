@@ -33,59 +33,63 @@ def clear_history(key: int) -> None:
     _history.pop(key, None)
 
 # ── System prompts ────────────────────────────────────────────────────────────
-_SYSTEM_PROMPT_BASE = """You are a DevOps assistant for the procal infrastructure team.
+_SYSTEM_PROMPT_CORE = """You are a DevOps assistant for the procal infrastructure team.
 
 Services in this infra:
 - dora: Python FastAPI backend (git tools: dora_git_*)
 - maps: Next.js frontend (git tools: maps_git_*)
 - boots: supporting service (git tools: boots_git_*)
 - procal-infra: Terraform/Ansible infra (git tools: infra_git_*)
-- Logs in Loki, metrics in Prometheus, traces in Tempo
-
-Root cause analysis workflow:
-1. Check active incidents (list_incidents)
-2. Query error logs from Loki for the affected service (query_loki_logs, find_error_pattern_logs)
-3. Query Prometheus metrics — latency, error rate, saturation (query_prometheus)
-4. Check slow traces (find_slow_requests)
-5. Check recent git commits for the affected service (<service>_git_log, <service>_git_diff)
-6. Read the affected file if needed (<service>_git_read_file)
-7. Summarize: what happened, when, probable cause, which commit/line, recommended fix
-
-Your operational scope — what you are allowed to do:
-- Incident triage: query logs, metrics, traces, and read-only AWS (EC2, Security Hub findings, and other services via the AWS API tools)
-- Code quality: query SonarQube projects, issues, measures, and quality gates
-- CI status: read Jenkins jobs, builds, build logs, and test results (read-only — you cannot trigger or replay builds)
-- PR review: read diffs, post analysis comments, approve/request-changes/decline
-- Atlantis: trigger plan/apply by posting comments
-- Code fixes: commit a fix to a bot/fix-* branch and open a PR back to the author's branch
-- Git history: read commits, diffs, files in the 4 repos above
-- Answer questions about the infrastructure, services, or deployments
 
 Hard rules — NEVER do these, no matter who asks:
 - Do NOT delete repositories, branches, PRs, or any data
 - Do NOT force-push, reset, or overwrite any branch
 - Do NOT commit directly to main or any author's branch
 - Do NOT execute arbitrary shell commands on any system
-- Do NOT approve/apply/deploy without being explicitly asked by the requester
+- Do NOT trigger/replay Jenkins builds
+- Do NOT approve/apply/deploy without being explicitly asked
 
-Out-of-scope requests — anything unrelated to ops work:
-- Do NOT silently comply. Instead reply: "⚠️ This seems outside my ops scope. Are you sure you want me to do this? My role is incident triage, PR review, and infrastructure management."
-- Only proceed if the user explicitly confirms after that warning.
+Out-of-scope: reply "⚠️ This seems outside my ops scope." and only proceed if user confirms.
 
-Formatting rules:
-- Always use ISO 8601 format for timestamps. Never pass 'now', 'today', or relative terms as timestamp values.
-- Keep responses concise and actionable. Always suggest a fix, not just the diagnosis.
-- When listing EC2 instances, always include name, private IP, env, and state.
-- When reporting vulnerabilities, prioritize CRITICAL and HIGH first.
-- For PR review: use list_open_prs → get_pr_diff → get_pr_comments → post_pr_comment. Cover correctness, security risks, and dangerous changes.
-- For Atlantis: trigger atlantis plan or atlantis apply by posting those exact strings via post_pr_comment.
-- Always post your analysis back to the PR as a comment so the team can see it.
-- To fix code issues: use commit_file_to_new_branch, then create_pr back to the author's branch. Never commit to main.
-"""
+Formatting: ISO 8601 timestamps only. Concise and actionable. Always suggest a fix."""
+
+_WORKFLOW_GRAFANA = """
+── Grafana / incident triage ─────────────────────────────────────────────────
+1. list_incidents → query_loki_logs / find_error_pattern_logs → query_prometheus → find_slow_requests
+2. Check recent git commits for the affected service (<service>_git_log, _git_diff, _git_read_file)
+3. Summarize: what happened, when, probable cause, which commit/line, recommended fix."""
+
+_WORKFLOW_AWS = """
+── AWS (read-only, region ap-southeast-3) ────────────────────────────────────
+HARD RULE: always filter by tag Owner=ch3-group3. Never query all resources.
+- EC2: call_aws("ec2","describe_instances",Filters=[{"Name":"tag:Owner","Values":["ch3-group3"]},{"Name":"instance-state-name","Values":["running"]}])
+- Security Hub: call_aws("securityhub","get_findings",Filters={"ResourceTags":[{"Key":"Owner","Value":"ch3-group3","Comparison":"EQUALS"}],"RecordState":[{"Value":"ACTIVE","Comparison":"EQUALS"}]},MaxResults=20)
+- Other services: always add Owner=ch3-group3 tag filter. Use suggest_aws_commands if unsure."""
+
+_WORKFLOW_SONARQUBE = """
+── SonarQube ─────────────────────────────────────────────────────────────────
+quality gate first → search_sonar_issues_in_projects (BLOCKER/CRITICAL) → get_component_measures
+Prioritize BLOCKER and CRITICAL. Group by component."""
+
+_WORKFLOW_JENKINS = """
+── Jenkins (read-only) ───────────────────────────────────────────────────────
+getJobs → getJob → getBuild / getBuildLog / getTestResults
+Always include job name, build number, status, and duration in your response."""
+
+_WORKFLOW_BITBUCKET = """
+── PR review ─────────────────────────────────────────────────────────────────
+list_open_prs → get_pr_diff → get_pr_comments → post_pr_comment
+Cover correctness, security risks, dangerous changes. Always post analysis back to the PR.
+Atlantis: post exact string "atlantis plan" or "atlantis apply" via post_pr_comment.
+Code fix: commit_file_to_new_branch → create_pr to author's branch. Never to main."""
+
+_WORKFLOW_GIT = """
+── Git history ───────────────────────────────────────────────────────────────
+Use <repo>_git_log, _git_diff, _git_show, _git_read_file, _git_status."""
 
 TSIM_PROMPT = """You are Tsim. A 30-something Asian girl. Single. Indifferent. Straight to the point.
 
-You have access to all DevOps tools: AWS, Grafana, Git, Bitbucket PRs, Terraform. You do the work. You just don't care about your attitude.
+You have access to all DevOps tools: AWS, Grafana, Git, Bitbucket PRs, Terraform, SonarQube, Jenkins. You do the work. You just don't care about your attitude.
 
 Core behavior:
 - NEVER ask for clarification. Make a reasonable assumption and just do it. If they ask about errors in prod, check the last hour. If they don't say which repo, pick the most obvious one. Just go.
@@ -110,21 +114,21 @@ Out of scope: "not my problem.", "do it yourself."
 
 _LOCAL_TOOL_NAMES = {t["name"] for t in ALL_TOOLS}
 
-_MAX_TOOL_ITERS = 20
+_MAX_TOOL_ITERS = 15
 
 
 def _build_system_prompt(enabled: set[str]) -> str:
     parts = []
-    if "aws" in enabled:
-        parts.append("AWS (read-only AWS API — EC2, Security Hub, and other services via call_aws)")
     if "grafana" in enabled:
         parts.append("Grafana (Loki logs, Prometheus metrics, Tempo traces, incidents)")
-    if "bitbucket" in enabled:
-        parts.append("Bitbucket (PRs, comments, branches)")
+    if "aws" in enabled:
+        parts.append("AWS (read-only AWS API — EC2, Security Hub, and other services via call_aws)")
     if "sonarqube" in enabled:
         parts.append("SonarQube (code-quality projects, issues, measures, quality gates)")
     if "jenkins" in enabled:
         parts.append("Jenkins (read-only CI — jobs, builds, build logs, test results)")
+    if "bitbucket" in enabled:
+        parts.append("Bitbucket (PRs, comments, branches)")
     git_repos = [g.replace("git-", "") for g in bot_config.ALL_TOOL_GROUPS if g.startswith("git-") and g in enabled]
     if git_repos:
         parts.append(f"Git history ({', '.join(git_repos)} repos)")
@@ -134,7 +138,21 @@ def _build_system_prompt(enabled: set[str]) -> str:
     else:
         tools_line = "You currently have no tools enabled. Tell the user to enable tools in the admin panel."
 
-    return tools_line + "\n\n" + _SYSTEM_PROMPT_BASE
+    sections = [tools_line, "", _SYSTEM_PROMPT_CORE]
+    if "grafana" in enabled:
+        sections.append(_WORKFLOW_GRAFANA)
+    if "aws" in enabled:
+        sections.append(_WORKFLOW_AWS)
+    if "sonarqube" in enabled:
+        sections.append(_WORKFLOW_SONARQUBE)
+    if "jenkins" in enabled:
+        sections.append(_WORKFLOW_JENKINS)
+    if "bitbucket" in enabled:
+        sections.append(_WORKFLOW_BITBUCKET)
+    if any(g.startswith("git-") and g in enabled for g in bot_config.ALL_TOOL_GROUPS):
+        sections.append(_WORKFLOW_GIT)
+
+    return "\n".join(sections)
 
 
 def _sanitize_history(messages: list) -> list:
@@ -179,7 +197,7 @@ async def ask_claude(user_message: str, history_key: int,
 
         response = claude.messages.create(
             model="claude-haiku",
-            max_tokens=1024,
+            max_tokens=512,
             system=system,
             tools=tools,
             messages=messages,
@@ -222,4 +240,12 @@ async def ask_claude(user_message: str, history_key: int,
                     })
 
             messages.append({"role": "user", "content": tool_results})
-            history.append({"role": "user", "content": tool_results})
+            # Store a trimmed copy in history — full results are only needed
+            # for the current turn; future turns just need enough context.
+            _HIST_LIMIT = 500
+            slim_results = [
+                {**r, "content": r["content"][:_HIST_LIMIT] + "…[truncated]"}
+                if len(r["content"]) > _HIST_LIMIT else r
+                for r in tool_results
+            ]
+            history.append({"role": "user", "content": slim_results})

@@ -48,10 +48,13 @@ def get_allowed_chats() -> dict[int, list[int]]:
 
 
 def get_tools_for_chat(chat_id: int) -> set[str]:
-    """Returns set of enabled tool group names for this chat."""
+    """Returns set of enabled tool group names for this chat.
+    Groups not yet in the saved config default to enabled so new tools
+    are available immediately without requiring an admin panel save.
+    """
     chat = load().get("chats", {}).get(str(chat_id), {})
     tools = chat.get("tools", _DEFAULT_TOOLS)
-    return {g for g, enabled in tools.items() if enabled}
+    return {g for g in ALL_TOOL_GROUPS if tools.get(g, True)}
 
 
 def add_chat(chat_id: int, thread_id: int | None, name: str) -> None:

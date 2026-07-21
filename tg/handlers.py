@@ -133,17 +133,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                     await update.message.reply_text(chunk)
             return
         except Exception as e:
-            traceback.print_exc()
             inner = e.exceptions[0] if hasattr(e, "exceptions") and e.exceptions else e
             err_str = str(inner)
             if "429" in err_str or "RateLimitError" in err_str:
                 wait = parse_reset_wait(err_str)
+                print(f"[rate-limit] quota exhausted, retrying in {wait}s (attempt {attempt + 1}/3)")
                 await edit(
                     f"⏳ Rate limited by LLM proxy (shared 100k tokens/min class quota is exhausted).\n"
                     f"Retrying in {wait}s (attempt {attempt + 1}/3)..."
                 )
                 await asyncio.sleep(wait)
             else:
+                traceback.print_exc()
                 msg = "\n".join(str(ex) for ex in e.exceptions) if hasattr(e, "exceptions") else err_str
                 await edit(f"❌ Error: {msg}")
                 return

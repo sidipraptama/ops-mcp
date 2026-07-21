@@ -16,7 +16,7 @@ AUDIT_THREAD_ID: int | None = int(v) if (v := os.getenv("AUDIT_THREAD_ID")) else
 AUDIT_LOG_FILE: str = os.path.expanduser("~/.ops-bot-audit.log")
 
 # ── Claude ────────────────────────────────────────────────────────────────────
-MAX_HISTORY = 5
+MAX_HISTORY = 2
 
 # ── PR Polling ────────────────────────────────────────────────────────────────
 POLL_REPO = "procal-infra-3"
@@ -65,16 +65,17 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
             **({"AWS_SESSION_TOKEN": v} if (v := os.getenv("AWS_SESSION_TOKEN")) else {}),
         },
     ),
-    # SonarQube MCP via npm — no Docker required.
+    # SonarQube MCP — official Docker image, spawned over stdio.
     "sonarqube": StdioServerParameters(
-        command="npx",
-        args=["-y", "@sonarqube/mcp-server"],
-        env={
-            "SONARQUBE_TOKEN": SONARQUBE_TOKEN,
-            "SONARQUBE_URL":   SONARQUBE_URL,
-            **({"SONARQUBE_ORG": SONARQUBE_ORG} if SONARQUBE_ORG else {}),
-            "PATH": _PATH,
-        },
+        command="docker",
+        args=[
+            "run", "-i", "--rm",
+            "-v", "sonarqube-mcp-storage:/app/storage",
+            "-e", f"SONARQUBE_TOKEN={SONARQUBE_TOKEN}",
+            "-e", f"SONARQUBE_URL={SONARQUBE_URL}",
+            *(["-e", f"SONARQUBE_ORG={SONARQUBE_ORG}"] if SONARQUBE_ORG else []),
+            "mcp/sonarqube",
+        ],
     ),
     "git-dora": StdioServerParameters(
         command=_uvx,
@@ -137,18 +138,9 @@ AWS_TOOLS_WHITELIST: set[str] = {
 SONARQUBE_TOOLS_WHITELIST: set[str] = {
     "search_my_sonarqube_projects",
     "search_sonar_issues_in_projects",
-    "get_component_measures",
-    "get_quality_gate_status",
     "get_project_quality_gate_status",
-    "list_quality_gates",
-    "get_raw_source",
-    "get_scm_info",
-    "list_languages",
-    "list_rule_repositories",
-    "show_rule",
+    "get_component_measures",
     "get_system_health",
-    "get_system_info",
-    "search_metrics",
 }
 
 # Read-only Jenkins tools only. triggerBuild/replayBuild/rebuildBuild are
@@ -158,10 +150,5 @@ JENKINS_TOOLS_WHITELIST: set[str] = {
     "getJob",
     "getBuild",
     "getBuildLog",
-    "searchBuildLog",
     "getTestResults",
-    "getBuildChangeSets",
-    "findJobsWithScmUrl",
-    "whoAmI",
-    "getStatus",
 }

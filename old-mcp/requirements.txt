@@ -1,4 +1,0 @@
-python-telegram-bot>=21
-openai>=1.40
-mcp>=1.0
-python-dotenv

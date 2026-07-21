@@ -29,13 +29,9 @@ BITBUCKET_USER = os.getenv("BITBUCKET_USER")
 BITBUCKET_APP_PASSWORD = os.getenv("BITBUCKET_APP_PASSWORD")
 
 # ── SonarQube ─────────────────────────────────────────────────────────────────
-# The Docker container downloads ~12 analyzer plugins at startup; the named
-# volume caches them so restarts are fast and the full tool list registers.
-_sonar_docker_env = ["-e", f"SONARQUBE_TOKEN={os.getenv('SONARQUBE_TOKEN', '')}"]
-if os.getenv("SONARQUBE_URL"):
-    _sonar_docker_env += ["-e", f"SONARQUBE_URL={os.getenv('SONARQUBE_URL')}"]
-if os.getenv("SONARQUBE_ORG"):
-    _sonar_docker_env += ["-e", f"SONARQUBE_ORG={os.getenv('SONARQUBE_ORG')}"]
+SONARQUBE_TOKEN = os.getenv("SONARQUBE_TOKEN", "")
+SONARQUBE_URL = os.getenv("SONARQUBE_URL", "")
+SONARQUBE_ORG = os.getenv("SONARQUBE_ORG", "")
 
 # ── Jenkins ───────────────────────────────────────────────────────────────────
 JENKINS_URL = os.getenv("JENKINS_URL", "")
@@ -43,8 +39,7 @@ JENKINS_USER = os.getenv("JENKINS_USER", "")
 JENKINS_TOKEN = os.getenv("JENKINS_TOKEN", "")
 _jenkins_auth = base64.b64encode(f"{JENKINS_USER}:{JENKINS_TOKEN}".encode()).decode()
 
-# ── MCP ───────────────────────────────────────────────────────────────────────
-# stdio servers — child processes the bot spawns
+# ── MCP stdio servers (child processes the bot spawns) ────────────────────────
 MCP_SERVERS: dict[str, StdioServerParameters] = {
     "grafana": StdioServerParameters(
         command=_uvx,
@@ -70,12 +65,16 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
             **({"AWS_SESSION_TOKEN": v} if (v := os.getenv("AWS_SESSION_TOKEN")) else {}),
         },
     ),
-    # SonarQube MCP — official Docker image, spawned over stdio.
+    # SonarQube MCP via npm — no Docker required.
     "sonarqube": StdioServerParameters(
-        command="docker",
-        args=["run", "-i", "--rm",
-              "-v", "sonarqube-mcp-storage:/app/storage",
-              *_sonar_docker_env, "mcp/sonarqube"],
+        command="npx",
+        args=["-y", "@sonarqube/mcp-server"],
+        env={
+            "SONARQUBE_TOKEN": SONARQUBE_TOKEN,
+            "SONARQUBE_URL":   SONARQUBE_URL,
+            **({"SONARQUBE_ORG": SONARQUBE_ORG} if SONARQUBE_ORG else {}),
+            "PATH": _PATH,
+        },
     ),
     "git-dora": StdioServerParameters(
         command=_uvx,
@@ -99,9 +98,9 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
     ),
 }
 
-# HTTP MCP servers — reached over Streamable HTTP, nothing spawned locally.
+# ── MCP HTTP servers (Streamable HTTP, no local process) ──────────────────────
 # Jenkins exposes MCP via the in-Jenkins `mcp-server` plugin. Only configured
-# when JENKINS_URL is set, so the connection is skipped otherwise.
+# when JENKINS_URL is set so the connection attempt is skipped otherwise.
 HTTP_MCP_SERVERS: dict[str, dict] = {}
 if JENKINS_URL:
     HTTP_MCP_SERVERS["jenkins"] = {
@@ -109,6 +108,7 @@ if JENKINS_URL:
         "headers": {"Authorization": f"Basic {_jenkins_auth}"},
     }
 
+# ── Tool whitelists ───────────────────────────────────────────────────────────
 GRAFANA_TOOLS_WHITELIST: set[str] = {
     "query_loki_logs",
     "find_error_pattern_logs",
@@ -152,8 +152,7 @@ SONARQUBE_TOOLS_WHITELIST: set[str] = {
 }
 
 # Read-only Jenkins tools only. triggerBuild/replayBuild/rebuildBuild are
-# intentionally excluded — replayBuild runs modified Groovy on agents (RCE);
-# defense-in-depth on top of the least-privilege Jenkins account.
+# intentionally excluded — replayBuild runs modified Groovy on agents (RCE).
 JENKINS_TOOLS_WHITELIST: set[str] = {
     "getJobs",
     "getJob",

@@ -87,5 +87,6 @@ async def notify_write(bot, user_id: int, username: str, tool: str, inputs: dict
             parse_mode="HTML",
             message_thread_id=thread_id,
         )
-    except Exception:
-        pass
+        print(f"[audit] notification sent to chat={chat_id} thread={thread_id}")
+    except Exception as e:
+        print(f"[audit] notify_write FAILED: chat={chat_id} thread={thread_id} error={e}")

@@ -50,21 +50,7 @@ MCP_SERVERS: dict[str, StdioServerParameters] = {
             "PATH": _PATH,
         },
     ),
-    # Read-only AWS API MCP — replaces the old hand-rolled boto3 tools.
-    # READ_OPERATIONS_ONLY=true blocks any mutating API call.
-    "aws": StdioServerParameters(
-        command=_uvx,
-        args=["awslabs.aws-api-mcp-server@latest"],
-        env={
-            "AWS_REGION": os.getenv("AWS_REGION", "ap-southeast-3"),
-            "READ_OPERATIONS_ONLY": "true",
-            "PATH": _PATH,
-            # Credentials flow via the EC2 instance role (IMDS) — no keys here.
-            **({"AWS_ACCESS_KEY_ID": v} if (v := os.getenv("AWS_ACCESS_KEY_ID")) else {}),
-            **({"AWS_SECRET_ACCESS_KEY": v} if (v := os.getenv("AWS_SECRET_ACCESS_KEY")) else {}),
-            **({"AWS_SESSION_TOKEN": v} if (v := os.getenv("AWS_SESSION_TOKEN")) else {}),
-        },
-    ),
+    # AWS tools are now local boto3 (tools/aws_tools.py) — no MCP server needed.
     # SonarQube MCP — official Docker image, spawned over stdio.
     "sonarqube": StdioServerParameters(
         command="docker",

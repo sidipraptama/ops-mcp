@@ -14,7 +14,7 @@ from config import (
     SONARQUBE_TOOLS_WHITELIST,
     JENKINS_TOOLS_WHITELIST,
 )
-from tools import ALL_TOOLS
+from tools import ALL_TOOLS, AWS_TOOL_NAMES, BITBUCKET_TOOL_NAMES
 
 # Mutable state — populated by init_mcp(), reused across all requests
 all_tools: list[dict] = list(ALL_TOOLS)
@@ -22,10 +22,11 @@ tool_to_session: dict[str, tuple] = {}   # {tool_key: (session, original_name)}
 tool_group: dict[str, str] = {}          # {tool_key: group_name}
 _mcp_stack: AsyncExitStack | None = None
 
-# Tag local tools with their group at module load. Only Bitbucket is local now
-# (AWS moved to the awslabs MCP server), so every local tool is a Bitbucket tool.
 for _t in ALL_TOOLS:
-    tool_group[_t["name"]] = "bitbucket"
+    if _t["name"] in AWS_TOOL_NAMES:
+        tool_group[_t["name"]] = "aws"
+    else:
+        tool_group[_t["name"]] = "bitbucket"
 
 
 def _server_meta(name: str) -> tuple[set[str], str, str]:

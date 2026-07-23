@@ -14,7 +14,7 @@ EC2 (procal-ops) — private subnet + NAT Gateway
     ├── admin_panel.py       ← FastAPI admin UI (port 8080)
     ├── config.py            ← static env vars and constants
     ├── bot_config.py        ← runtime chat/tool config (~/.ops-bot-config.json)
-    ├── mcp_client.py        ← MCP session management (Grafana + Git)
+    ├── mcp_client.py        ← MCP session management (Grafana, AWS, SonarQube, Jenkins, Git)
     ├── claude_client.py     ← Claude API, conversation history, prompts
     ├── audit.py             ← audit trail (log file + Telegram notifications)
     ├── polling.py           ← auto PR review loop (infra repo → main)
@@ -49,14 +49,18 @@ config.py  ← no internal imports (stdlib + dotenv only)
 
 ### How tools work
 
-Claude receives a unified tool list built from three sources:
+Claude receives a unified tool list built from a mix of local (Python) tools and MCP servers:
 
 | Source | Tools | Count |
 |--------|-------|-------|
-| `tools/aws.py` | EC2 (`list_ec2_instances`), Inspector (`list_inspector_findings`) | 2 |
-| `tools/bitbucket.py` | PR CRUD, comments, approvals, branch commits | 11 |
-| Grafana MCP server | Loki logs, Prometheus, incidents, traces | 7 |
-| Git MCP servers (×4) | `git_log`, `git_diff`, `git_show`, `git_read_file`, `git_status` per repo | 20 |
+| `tools/bitbucket.py` (local) | PR CRUD, comments, approvals, branch commits | 11 |
+| AWS API MCP server (`awslabs`, stdio) | Read-only AWS API — EC2, Security Hub, and other services via `call_aws` | ~2 |
+| SonarQube MCP server (Docker, stdio) | Projects, issues, measures, quality gates | ~14 |
+| Jenkins MCP server (plugin, HTTP — optional) | Read-only jobs, builds, build logs, test results | ~10 |
+| Grafana MCP server (stdio) | Loki logs, Prometheus, incidents, traces | 7 |
+| Git MCP servers (×4, stdio) | `git_log`, `git_diff`, `git_show`, `git_read_file`, `git_status` per repo | 20 |
+
+MCP tool counts are whitelisted in `config.py` (`*_TOOLS_WHITELIST`); the actual number loaded is logged at startup as `Connected to <server> MCP — N/M tools loaded`.
 
 Git tools are prefixed by repo: `dora_git_log`, `maps_git_diff`, `infra_git_read_file`, etc.
 
@@ -64,9 +68,11 @@ Git tools are prefixed by repo: `dora_git_log`, `maps_git_diff`, `infra_git_read
 
 | Toggle | Controls |
 |--------|----------|
-| `aws` | EC2 instance listing, Inspector vulnerability findings |
+| `aws` | Read-only AWS API (EC2, Security Hub findings, and other services) |
 | `bitbucket` | All Bitbucket operations across all repos (PRs, comments, approvals) |
 | `grafana` | Loki logs, Prometheus metrics, Tempo traces, incidents |
+| `sonarqube` | SonarQube projects, issues, measures, quality gates |
+| `jenkins` | Read-only Jenkins CI (jobs, builds, logs, test results) |
 | `git-dora` | Read git history from local `~/dora` clone |
 | `git-maps` | Read git history from local `~/maps` clone |
 | `git-boots` | Read git history from local `~/boots` clone |
@@ -210,7 +216,22 @@ Changes are saved immediately to `~/.ops-bot-config.json` and picked up by the b
 sudo apt update && sudo apt install -y python3 python3-pip python3-venv git
 curl -LsSf https://astral.sh/uv/install.sh | sh
 source $HOME/.local/bin/env
+
+# Docker — required for the SonarQube MCP server (bot spawns mcp/sonarqube over stdio)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker ubuntu   # re-login (or `newgrp docker`) so the bot user can run docker
+docker pull mcp/sonarqube        # pre-pull so first startup isn't slow
+
+# SonarQube analyzer cache — the server downloads ~12 plugins on first run;
+# this named volume caches them so restarts are fast and the full tool list registers.
+docker volume create sonarqube-mcp-storage
 ```
+
+> Instance sizing: the Java-based SonarQube MCP container wants ~2 GB RAM. Use `t3.small` or larger — `t3.micro` will OOM-kill it.
+
+> `uv` provides `uvx`, which the bot uses to spawn the Grafana, AWS API, and Git MCP servers. It installs per-user into `~/.local/bin` — install it as the **same user** the systemd unit runs as (`ubuntu`).
+
+**Jenkins (optional)** — the Jenkins MCP is the in-Jenkins [`mcp-server` plugin](https://plugins.jenkins.io/mcp-server) (Jenkins **≥ 2.533**), reached over Streamable HTTP; nothing is installed on the bot host. Install the plugin in Jenkins, create a least-privilege bot account (**Overall/Read + Job/Read** only — never Build/Replay), and generate an API token. Leave `JENKINS_URL` blank in `.env` to disable Jenkins tools entirely. The Jenkins security group must accept HTTPS from the bot instance.
 
 ### 2. Clone repos for Git MCP context
 
@@ -270,6 +291,24 @@ BITBUCKET_USER=your@email.com
 BITBUCKET_APP_PASSWORD=...
 BITBUCKET_WORKSPACE=academytools
 
+# AWS — read-only AWS API MCP (awslabs). On EC2 prefer the instance role (IMDS);
+# the explicit keys below are only needed when running off-instance.
+AWS_REGION=ap-southeast-3
+# AWS_ACCESS_KEY_ID=
+# AWS_SECRET_ACCESS_KEY=
+# AWS_SESSION_TOKEN=
+
+# SonarQube — read-only token
+SONARQUBE_TOKEN=squ_...
+SONARQUBE_URL=https://sonarqube.ch3-group3.devopsinstitute.id
+# SonarQube Cloud uses SONARQUBE_ORG instead of SONARQUBE_URL
+# SONARQUBE_ORG=
+
+# Jenkins — leave JENKINS_URL blank to disable Jenkins tools
+JENKINS_URL=https://jenkins.ch3-group3.devopsinstitute.id
+JENKINS_USER=mcp-bot
+JENKINS_TOKEN=...
+
 # Admin panel
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=<strong-password>   # required — bot refuses to start without this
@@ -290,14 +329,24 @@ ADMIN_PORT=8080
 | `GRAFANA_SERVICE_ACCOUNT_TOKEN` | Grafana → Administration → Service accounts → Add token (Viewer role) |
 | `BITBUCKET_USER` | Your Bitbucket account **email** (not username) |
 | `BITBUCKET_APP_PASSWORD` | Bitbucket → Personal settings → App passwords → Create (needs: Repositories read/write, Pull requests read/write) |
+| `SONARQUBE_TOKEN` | SonarQube → My Account → Security → Generate Token (read-only, scoped to needed projects) |
+| `SONARQUBE_URL` | Your SonarQube instance URL (self-hosted). SonarQube Cloud uses `SONARQUBE_ORG` instead |
+| `JENKINS_URL` | Your Jenkins base URL — blank to disable Jenkins tools |
+| `JENKINS_USER` / `JENKINS_TOKEN` | Dedicated bot account (Overall/Read + Job/Read) → account → Security → API Token → Generate |
 
 ### 6. IAM role
 
-Attach an IAM role to the EC2 instance with:
-- `ec2:Describe*`
-- `inspector2:ListFindings`, `inspector2:GetFindingsStatistics`
-- `cloudwatch:GetMetricData`, `cloudwatch:DescribeAlarms`
-- `logs:DescribeLogGroups`, `logs:GetLogEvents`, `logs:FilterLogEvents`
+The AWS API MCP server (`awslabs.aws-api-mcp-server`) can call any AWS API the
+credentials allow, so **the IAM policy is the security boundary** — keep it read-only.
+Attach an instance role scoped to what you actually need, e.g. AWS-managed
+`ReadOnlyAccess` (broad) or a tighter policy covering the services you query
+(`ec2:Describe*`, `securityhub:GetFindings`, `cloudwatch:*` read, `logs:*` read, …).
+
+Two layers keep AWS read-only, keep both:
+1. **`READ_OPERATIONS_ONLY=true`** on the MCP server (set in `config.py`) — blocks mutating API calls.
+2. **Read-only IAM policy** on the instance role.
+
+Credentials flow via IMDS (the instance role) — no keys in `.env`. Enforce IMDSv2.
 
 ### 7. Run as systemd services
 
@@ -343,12 +392,11 @@ pkill -f bot.py && sudo systemctl start ops-bot
 | `bot_config.py` | Loads/saves `~/.ops-bot-config.json`. Source of truth for allowed chats, thread IDs, and per-chat tool groups |
 | `admin_panel.py` | FastAPI web UI (port 8080). Login, chat management, per-chat tool toggles |
 | `config.py` | Static constants and env vars: MCP server paths, poll interval, audit settings |
-| `mcp_client.py` | Connects to Grafana and Git MCP servers at startup. Populates `all_tools`, `tool_to_session`, `tool_group` |
+| `mcp_client.py` | Connects to stdio (Grafana, AWS, SonarQube, Git) and HTTP (Jenkins) MCP servers at startup. Populates `all_tools`, `tool_to_session`, `tool_group` |
 | `claude_client.py` | `ask_claude()` — Claude API loop with tool dispatch, per-user history, both system prompts |
 | `audit.py` | Appends to `~/.ops-bot-audit.log`. Sends Telegram notifications for write-action tool calls. Destination read from `bot_config` at call time (configurable via admin panel). |
 | `polling.py` | Background asyncio task watching `procal-infra-3` → `main` PRs every 5 min |
-| `tools/__init__.py` | Unified tool registry: `ALL_TOOLS`, `BITBUCKET_TOOL_NAMES`, `run_tool()` dispatcher |
-| `tools/aws.py` | boto3 EC2 + Inspector: `AWS_TOOLS` schemas and executor |
+| `tools/__init__.py` | Unified local-tool registry: `ALL_TOOLS`, `BITBUCKET_TOOL_NAMES`, `run_tool()` dispatcher (Bitbucket only; AWS moved to the awslabs MCP server) |
 | `tools/bitbucket.py` | Bitbucket REST API + `BITBUCKET_TOOLS` schemas: PR CRUD, comments, branch creation, file commits |
 | `templates/admin.html` | Admin panel SPA — all HTML, CSS, and JavaScript |
 | `tg/handlers.py` | `handle_message` routing: allowlist, mention/reply detection, inline command dispatch |
